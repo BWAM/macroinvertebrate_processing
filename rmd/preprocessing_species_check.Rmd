@@ -1,0 +1,121 @@
+---
+title: "macroinvertebrate_processing_2021_in-house-processed"
+author: 'NYSDEC SMAS : Keleigh Reynolds'
+date: "2/3/2021"
+output: html_document
+params:
+  file_name: "2020_NYSSBU_MacroTaxaOutput_1_24_22_kar_split.csv"
+  user: kareynol
+  file_type: "waa"
+---
+
+```{r include=FALSE,message=FALSE}
+library(dplyr)
+
+#file_type options : "waa" or "internal"
+
+#run the functions script
+source("functions.R")
+```
+
+```{r}
+#first read in the raw file
+#raw<-readxl::read_excel("C:/Users/kareynol/Desktop/R_SMAS/macro_processing_in_house/data/SampData_2018.xlsx")
+
+raw<-read.csv(here::here(paste("data/",params$file_name,sep = "")),stringsAsFactors = FALSE)
+m_data_prep(df=raw)
+
+
+```
+
+## Run the species QA script to see if any are not matching the Master table.
+
+```{r}
+site_check(prepped_df)
+
+species_check(prepped_df)
+```
+
+```{r}
+#prep for tables for Data Mod: this will do the macro species sample event table and the 
+#Sample info history tables, and save it to the outputs folder with today's date.
+
+if (params$file_type=="internal"){tables_1_2(prepped_df)}
+if (params$file_type=="waa"){tables_1_2.waa(prepped_df)}
+
+```
+
+```{r}
+#Run BAP and create BAP entry for table
+library(BAP)
+
+#run BAP's data prep on the raw file
+bap<-BAP::data_prep(prepped_df)
+
+#split by collection method and run the appropriate BA
+bap.final<-apply_bap(bap)
+
+#create metric file with correct names
+metric_table(bap.final)
+
+```
+
+```{r}
+#access the existing tables and create new versions with the date
+
+#going to leave this as not a function since the locations will likely change.
+#read in the existing tables
+
+#sample event
+sample.f<-read.csv(dir(paste("C:/Users/",params$user,"/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/Cleaned Files/Final_Macro_ITS/",sep=""),full.names = T, pattern="*S_MACRO_SPECIES_SAMP_INF_HIST.csv"),stringsAsFactors = FALSE)
+
+#species history
+species.f<-read.csv(dir(paste("C:/Users/",params$user,"/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/Cleaned Files/Final_Macro_ITS/",sep=""),full.names = T, pattern="*S_MACRO_SPECIES_DATA_HISTORY.csv"),stringsAsFactors = FALSE)
+
+#metrics
+metrics.f<-read.csv(dir(paste("C:/Users/",params$user,"/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/Cleaned Files/Final_Macro_ITS/",sep=""),full.names = T, pattern="*S_MACRO_METRICS_DATA_HISTORY.csv"),stringsAsFactors = FALSE)
+
+#append each of them
+
+#first get the date for the new file
+time=Sys.Date()
+time.t=format(time,"%Y%m%d")
+
+#first sample event
+sample.new<-rbind(sample.f,samp_event)
+
+write.csv(sample.new,paste("C:/Users/",params$user,"/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/Cleaned Files/Final_Macro_ITS/",
+                                time.t,"_S_MACRO_SPECIES_SAMP_INF_HIST.csv",sep = ""),row.names = FALSE)
+
+#then the raw species
+species.new<-rbind(species.f,species_history)
+
+write.csv(species.new,paste("C:/Users/",params$user,"/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/Cleaned Files/Final_Macro_ITS/",
+                                time.t,"_S_MACRO_SPECIES_DATA_HISTORY.csv",sep = ""),row.names = FALSE)
+
+#then metrics
+metrics.new<-full_join(metrics.f,metrics.subset) #need the full join since the metrics won't always have the same columms
+
+write.csv(metrics.new,paste("C:/Users/",params$user,"/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/Cleaned Files/Final_Macro_ITS/",
+                                time.t,"_S_MACRO_METRICS_DATA_HISTORY.csv",sep = ""),row.names = FALSE)
+
+
+
+```
+
+```{r}
+#make the metrics with all fields csv
+metrics.all<-merge(metrics.new,sample.new,by.x="MMDH_LINKED_ID_VALIDATOR",by.y="MSSIH_LINKED_ID_VALIDATOR",all.x = TRUE)
+
+metrics.all<-metrics.all %>% distinct()
+
+#save file
+write.csv(metrics.all,paste("C:/Users/",params$user,"/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/Cleaned Files/Final_Macro_ITS/",
+                                time.t,"metrics.with.all.fields.csv",sep = ""),row.names = FALSE)
+
+
+```
+
+
+
+
