@@ -4,7 +4,7 @@ author: 'NYSDEC SMAS : Keleigh Reynolds'
 date: "2/3/2021"
 output: html_document
 params:
-  file_name: "2020_NYSSBU_MacroTaxaOutput_1_24_22_kar_split.csv"
+  file_name: "Esopus_MacroData_2021.csv"
   user: kareynol
   file_type: "waa"
 ---
@@ -16,6 +16,7 @@ library(dplyr)
 
 #run the functions script
 source("functions.R")
+
 ```
 
 ```{r}
@@ -23,7 +24,13 @@ source("functions.R")
 #raw<-readxl::read_excel("C:/Users/kareynol/Desktop/R_SMAS/macro_processing_in_house/data/SampData_2018.xlsx")
 
 raw<-read.csv(here::here(paste("data/",params$file_name,sep = "")),stringsAsFactors = FALSE)
-m_data_prep(df=raw)
+
+
+if(params$file_type=="internal"){m_data_prep(raw)}
+
+if(params$file_type=="waa"){waa_data_prep(raw)
+ prepped_df<-prepped_df3 #renames and copies the df that was made 
+ }
 
 
 ```
@@ -50,10 +57,10 @@ if (params$file_type=="waa"){tables_1_2.waa(prepped_df)}
 library(BAP)
 
 #run BAP's data prep on the raw file
-bap<-BAP::data_prep(prepped_df)
+bap.prepped<-BAP::data_prep(prepped_df)
 
 #split by collection method and run the appropriate BA
-bap.final<-apply_bap(bap)
+bap.final<-apply_bap(bap.prepped)
 
 #create metric file with correct names
 metric_table(bap.final)
@@ -84,17 +91,27 @@ time.t=format(time,"%Y%m%d")
 #first sample event
 sample.new<-rbind(sample.f,samp_event)
 
+sample.new [is.na(sample.new)] <- ""
+
 write.csv(sample.new,paste("C:/Users/",params$user,"/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/Cleaned Files/Final_Macro_ITS/",
                                 time.t,"_S_MACRO_SPECIES_SAMP_INF_HIST.csv",sep = ""),row.names = FALSE)
 
+species_history<-species_history %>% 
+  dplyr::rename(MSDH_INDIVIDUAL_SPECIES_CNT=MSSIH_TOTAL_INDIV_CNT)
+
 #then the raw species
 species.new<-rbind(species.f,species_history)
+
+species.new [is.na(species.new)] <- ""
 
 write.csv(species.new,paste("C:/Users/",params$user,"/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/Cleaned Files/Final_Macro_ITS/",
                                 time.t,"_S_MACRO_SPECIES_DATA_HISTORY.csv",sep = ""),row.names = FALSE)
 
 #then metrics
 metrics.new<-full_join(metrics.f,metrics.subset) #need the full join since the metrics won't always have the same columms
+
+metrics.new [is.na(metrics.new)] <- ""
+
 
 write.csv(metrics.new,paste("C:/Users/",params$user,"/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/Cleaned Files/Final_Macro_ITS/",
                                 time.t,"_S_MACRO_METRICS_DATA_HISTORY.csv",sep = ""),row.names = FALSE)
@@ -108,6 +125,9 @@ write.csv(metrics.new,paste("C:/Users/",params$user,"/New York State Office of I
 metrics.all<-merge(metrics.new,sample.new,by.x="MMDH_LINKED_ID_VALIDATOR",by.y="MSSIH_LINKED_ID_VALIDATOR",all.x = TRUE)
 
 metrics.all<-metrics.all %>% distinct()
+
+metrics.all [is.na(metrics.all)] <- ""
+
 
 #save file
 write.csv(metrics.all,paste("C:/Users/",params$user,"/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/Cleaned Files/Final_Macro_ITS/",

@@ -1,10 +1,44 @@
 #thinking about functions for the processing of macro data
 
 waa_data_prep<-function(df){
-  prepped_df<-df
-  #adjust
+  library(dplyr)
+  
+  prepped_df<-df %>% 
+    select(MSSIH_EVENT_SMAS_HISTORY_ID,
+           MSSIH_BIOSAMPLE_COLLECT_METHOD,
+           MSSIH_REPLICATE,
+           MSSIH_EVENT_SMAS_SAMPLE_DATE,
+           MSDH_GENSPECIES,
+           MSDH_INDIVIDUAL_SPECIES_CNT,
+           MSSIH_TOTAL_INDIV_CNT_IND
+           )
+ prepped_df2 <- cbind(prepped_df, stringr::str_split_fixed(prepped_df$MSSIH_EVENT_SMAS_HISTORY_ID,"-",3))
+
+  #rename columns and create other ones that exist in the original BAP format
+  prepped_df2<-prepped_df2 %>% 
+    dplyr::rename(BASIN=`1`,
+                  LOCATION=`2`,
+                  RIVMILE=`3`)
+    
+  prepped_df2<-prepped_df2 %>% 
+    mutate(COLL_DATE=MSSIH_EVENT_SMAS_SAMPLE_DATE,
+         Replicate=MSSIH_REPLICATE,
+         MACRO_GENSPECIES=MSDH_GENSPECIES,
+         INDIV=MSDH_INDIVIDUAL_SPECIES_CNT,
+         site_id=MSSIH_EVENT_SMAS_HISTORY_ID
+         )
+
+collect<-read.csv(here::here("lkp/20211102_S_BIOSAMPLE_COLLECT_METHOD_its_kar.csv"))
+
+prepped_df3<-merge(prepped_df2,collect,
+          by.x = "MSSIH_BIOSAMPLE_COLLECT_METHOD",
+          by.y="BIOSAMPLE_COLLECT_METHOD")
+prepped_df3$COLLECT<-paste(prepped_df3$BIOSAMPLE_COLLECT_METHOD_ID)
+
+.GlobalEnv$prepped_df3 <- prepped_df3
 }
 
+#######################################################################
 
 m_data_prep<-function(df){
   prepped_df<-df
@@ -25,6 +59,10 @@ m_data_prep<-function(df){
            LOCATION=LOCATION_good,
            COLL_DATE=DATE,
            MACRO_GENSPECIES=GENSPECIES)
+  
+  prepped_df$Replicate<-prepped_df$MSSIH_REPLICATE
+  prepped_df$INDIV<-(as.numeric(prepped_df$MSDH_INDIVIDUAL_SPECIES_CNT))
+  
  .GlobalEnv$prepped_df <- prepped_df
 }
 
@@ -218,12 +256,12 @@ metric_table<-function(df){
   metrics<-df
   
   #get collection method in here
-  collect<-bap %>% 
-    select(SITE_ID,COLLECT) %>% 
+  collect<-bap.prepped %>% 
+    select(MSSIH_EVENT_SMAS_HISTORY_ID,COLLECT) %>% 
     distinct() %>% 
-    rename(site_id=SITE_ID)
+    dplyr::rename(site_id=MSSIH_EVENT_SMAS_HISTORY_ID)
   
-  metrics$DATE<-as.Date(metrics$DATE,"%m/%d/%Y")
+  metrics$DATE<-as.Date(metrics$DATE,"%Y-%m-%d")
   
   metrics<-metrics %>% #make the validation id
     mutate(BASIN=stringr::str_pad(BASIN,2,side = c("left"),pad = "0")) %>% 
@@ -275,21 +313,19 @@ tables_1_2.waa<-function(df){
     #create species event table
     tables$date<-format(tables$COLL_DATE,"%Y%m%d")
     tables<-tables %>% 
-      mutate(MSSIH_LINKED_ID_VALIDATOR=paste(site_id,date,BIOSAMPLE_COLLECT_METHOD_ID,Replicate,sep = "_")) %>% 
+      mutate(MSSIH_LINKED_ID_VALIDATOR=paste(MSSIH_EVENT_SMAS_HISTORY_ID,date,BIOSAMPLE_COLLECT_METHOD_ID,MSSIH_REPLICATE,sep = "_")) %>% 
       mutate(MSSIH_EVENT_SMAS_SAMPLE_DATE=format(COLL_DATE,"%m/%d/%Y")) %>% 
       mutate(MSSIH_TOTAL_INDIV_CNT_NOTE="") %>% 
       mutate(Taxonomist_name=paste("WAA")) %>% 
-      rename(MSSIH_TAXONOMIST=Taxonomist_name,
-             MSSIH_REPLICATE=Replicate,
-             MSSIH_EVENT_SMAS_HISTORY_ID=site_id
+      dplyr::rename(MSSIH_TAXONOMIST=Taxonomist_name
       )
     
     
     #create sum of samples
     sum<-tables %>% 
-      select(MSSIH_LINKED_ID_VALIDATOR,INDIV) %>% 
+      select(MSSIH_LINKED_ID_VALIDATOR,MSSIH_TOTAL_INDIV_CNT_IND) %>% 
       group_by(MSSIH_LINKED_ID_VALIDATOR) %>% 
-      summarise(MSSIH_TOTAL_INDIV_CNT=sum(INDIV))
+      summarise(MSSIH_TOTAL_INDIV_CNT=max(MSSIH_TOTAL_INDIV_CNT_IND))
     
     #merge back
     tables<-merge(tables,sum, by="MSSIH_LINKED_ID_VALIDATOR")
@@ -309,9 +345,8 @@ tables_1_2.waa<-function(df){
       distinct()
     
     species_history<-tables %>% 
-      select(MSSIH_LINKED_ID_VALIDATOR,INDIV,MACRO_GENSPECIES) %>% 
-      rename(MSDH_INDIVIDUAL_SPECIES_CNT=INDIV,
-             MSTR_MACRO_SPECIES_ID=MACRO_GENSPECIES,
+      select(MSSIH_LINKED_ID_VALIDATOR,MSSIH_TOTAL_INDIV_CNT,MACRO_GENSPECIES) %>% 
+      rename(MSTR_MACRO_SPECIES_ID=MACRO_GENSPECIES,
              MSDH_LINKED_ID_VALIDATOR=MSSIH_LINKED_ID_VALIDATOR) %>% 
       mutate(MSTR_MACRO_SPECIES_ID=tolower(MSTR_MACRO_SPECIES_ID)) %>% 
       mutate(MSTR_MACRO_SPECIES_ID=gsub(" ","_",MSTR_MACRO_SPECIES_ID))
@@ -336,6 +371,9 @@ tables_1_2.waa<-function(df){
 site_check<-function(df){
   #checks to see if there are site id's that need to be changed
   sites<-df
+  if(params$file_type=="waa"){
+    sites$site_id<-paste(sites$MSSIH_EVENT_SMAS_HISTORY_ID)
+  }
   #read in the site check file
   site_check.f<-readxl::read_excel(paste("C:/Users/",params$user,
                                "/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/Cleaned Files/Final_Sites_ITS/c2021_Sites_crosswalk_summary_v4_created_20211116.xlsx",
