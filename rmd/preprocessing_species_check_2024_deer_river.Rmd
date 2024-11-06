@@ -1,0 +1,134 @@
+---
+title: "macroinvertebrate_processing_2021_in-house-processed"
+author: 'NYSDEC SMAS : Keleigh Reynolds'
+date: "2/3/2021"
+output: html_document
+params:
+  file_name: "L:/DOW/BWAM Share/data/lab_data/WAA/2024/raw/Copy-DeerRiver_MacroTaxa.csv"
+  user: kareynol
+  file_type: "waa"
+---
+
+```{r include=FALSE,message=FALSE}
+library(dplyr)
+
+#file_type options : "waa" or "internal"
+
+#run the functions script
+source("functions.R")
+
+```
+
+```{r}
+#first read in the raw file
+#raw<-readxl::read_excel("C:/Users/kareynol/Desktop/R_SMAS/macro_processing_in_house/data/SampData_2018.xlsx")
+
+raw<-read.csv(params$file_name)
+
+#check date format on the input data
+IsDate <- function(mydate, date.format = "%d/%m/%Y") {
+x<-tryCatch(!is.na(as.Date(mydate, date.format)))
+if("FALSE" %in% x){
+   return("The dates are not in the right format, please re-format to %d/%m/%Y")
+}
+}
+
+IsDate(raw$MSSIH_EVENT_SMAS_SAMPLE_DATE)
+
+#fix the dates for the 2024 data files
+raw<-raw %>% 
+  mutate(MSSIH_EVENT_SMAS_SAMPLE_DATE = format(as.Date(MSSIH_EVENT_SMAS_SAMPLE_DATE,"%d-%m-%Y"),"%d/%m/%Y"))
+
+#raw<-read.csv("C:/Users/kareynol/OneDrive - New York State Office of Information Technology Services/Desktop/raw/Copy of USGS_540_13_MacroTaxaOutput.csv") #for scott george
+
+#12/6/2022 merge all the new files to get the table correct
+# raw2<-read.csv(here::here("data/MacroData_2021_kar.csv"))
+# raw3<-read.csv(here::here("data/Esopus_MacroData_2021.csv"))
+# raw3$X._Grids<-""
+# raw_all<-rbind(raw,raw2,raw3)
+#raw<-raw_all
+
+#raw<-read.csv("L:/DOW/BWAM Share/data/lab_data/WAA/2023/raw/Copy of MacroTaxa_470.23-078_085.csv")
+
+if(params$file_type=="internal"){m_data_prep(raw)}
+
+if(params$file_type=="waa"){waa_data_prep(raw)
+ prepped_df<-prepped_df3 #renames and copies the df that was made 
+}
+
+
+
+```
+
+## Run the species QA script to see if any are not matching the Master table.
+
+```{r}
+#check to see if there is a file called "newly_found_species.csv" in the outputsfolder. If there is, please rename it 
+site_check(prepped_df)
+
+species_check(prepped_df)
+
+#for 2022 data
+# prepped_df<-prepped_df %>%
+#   mutate(MSDH_GENSPECIES=case_when(
+#     MSDH_GENSPECIES == "neoleptophlebia_sp."~"undetermined_leptophlebiidae",
+#     TRUE~MSDH_GENSPECIES))
+# 
+# #for 2022 lakes data - 10/24/2023
+# 
+# prepped_df<-prepped_df3 %>% 
+#   #subset(site_id != "HWF") %>% 
+#   subset(site_id == "04-LHONYE-1.0") %>% 
+#   subset(site_id == "04-LHONYE-0.0")
+
+
+
+```
+
+```{r}
+#prep for tables for Data Mod: this will do the macro species sample event table and the 
+#Sample info history tables, and save it to the outputs folder with today's date.
+
+if (params$file_type=="internal"){tables_1_2(prepped_df)}
+if (params$file_type=="waa"){tables_1_2.waa(prepped_df)}
+
+```
+
+```{r}
+#Run BAP and create BAP entry for table
+library(BAP)
+
+#run BAP's data prep on the raw file
+bap.prepped<-BAP::data_prep(prepped_df)
+#2022 data fixes, references seemed odd
+bap.prepped$REFERENCE<-""
+bap.prepped<-bap.prepped %>% 
+  distinct()
+
+
+
+#split by collection method and run the appropriate BA
+bap.final<-apply_bap(bap.prepped)
+
+#this is probably where we can figure out the new code from - start here
+
+#create metric file with correct names
+metrics_final<-metric_table(bap.final)
+
+write.csv(metrics.subset,here::here("outputs/deer_river_10_4_24_METRICS.csv"))
+
+write.csv(metrics.subset,"L:/DOW/BWAM Share/data/lab_data/BAP_script_results/2024/deer_river_10_4.csv")
+
+```
+combine all of the 2024 processed data
+
+```{r WQMA-data-integration}
+
+
+
+```
+
+
+
+
+

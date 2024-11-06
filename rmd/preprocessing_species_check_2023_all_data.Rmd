@@ -1,0 +1,665 @@
+---
+title: "macroinvertebrate_processing_2021_in-house-processed"
+author: 'NYSDEC SMAS : Keleigh Reynolds'
+date: "2/3/2021"
+output: html_document
+params:
+  file_name: "L:/DOW/BWAM Share/data/lab_data/WAA/2023/raw/MacroTaxa_470.23.csv"
+  user: kareynol
+  file_type: "waa"
+---
+
+```{r include=FALSE,message=FALSE}
+library(arrow)
+library(dplyr)
+library(readr)
+
+#file_type options : "waa" or "internal"
+
+#run the functions script
+source("functions.R")
+
+```
+
+```{r}
+#first read in the raw files for 2023
+raw<-read.csv(params$file_name)
+
+#11/5/2024 reading in everything in the L drive for 2023 and 2024
+list<-list.files("L:/DOW/BWAM Share/data/lab_data/WAA/2023/raw/",
+                 pattern = "*.csv",
+                 full.names = TRUE)
+raw.file<-lapply(list,
+                 read.csv)
+
+#merge them together
+raw<-bind_rows(raw.file,
+               .id = "column_label")
+
+if(params$file_type=="internal"){m_data_prep(raw)}
+
+if(params$file_type=="waa"){waa_data_prep(raw)
+ prepped_df<-prepped_df3 #renames and copies the df that was made 
+}
+
+#11/4/24 check to see why there are less records - Archer creek is teh missing records - these are not ours
+sites.raw<-unique(raw$MSSIH_EVENT_SMAS_HISTORY_ID)
+sites.merged<-unique(prepped_df3$MSSIH_EVENT_SMAS_HISTORY_ID)
+
+setdiff(sites.raw,sites.merged) # Yes confirmed it is Archer Creek
+
+```
+
+## Run the species QA script to see if any are not matching the Master table.
+
+```{r}
+#check to see if there is a file called "newly_found_species.csv" in the outputsfolder. If there is, please rename it 
+site_check(prepped_df)
+
+species_check(prepped_df)
+
+#for 2022 data
+# prepped_df<-prepped_df %>%
+#   mutate(MSDH_GENSPECIES=case_when(
+#     MSDH_GENSPECIES == "neoleptophlebia_sp."~"undetermined_leptophlebiidae",
+#     TRUE~MSDH_GENSPECIES))
+# 
+# #for 2022 lakes data - 10/24/2023
+# 
+# prepped_df<-prepped_df3 %>% 
+#   #subset(site_id != "HWF") %>% 
+#   subset(site_id == "04-LHONYE-1.0") %>% 
+#   subset(site_id == "04-LHONYE-0.0")
+
+```
+
+```{r}
+#prep for tables for Data Mod: this will do the macro species sample event table and the 
+#Sample info history tables, and save it to the outputs folder with today's date.
+
+if (params$file_type=="internal"){tables_1_2(prepped_df)}
+if (params$file_type=="waa"){tables_1_2.waa(prepped_df)}
+
+```
+
+```{r}
+#Run BAP and create BAP entry for table
+library(BAP)
+
+#run BAP's data prep on the raw file
+bap.prepped<-BAP::data_prep(prepped_df)
+#2022 data fixes, references seemed odd
+bap.prepped$REFERENCE<-""
+bap.prepped<-bap.prepped %>% 
+  distinct()
+
+
+
+#split by collection method and run the appropriate BA
+bap.final<-apply_bap(bap.prepped)
+
+#this is probably where we can figure out the new code from - start here
+
+#create metric file with correct names
+metrics_final<-metric_table(bap.final)
+
+sites.event<-unique(samp_event$MSSIH_EVENT_SMAS_HISTORY_ID)
+sites.metrics<-unique(metrics.subset$site_id)
+
+setdiff(sites.event,sites.metrics) #these are all low gradient besides the lake 04-LHONYE-0.0
+```
+Prep for WQMA
+
+```{r WQMA-data-integration}
+
+#write these to the L drive
+#write.csv(metrics.subset, "L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/METRICS_2023_processed_11_5_24_KAR.csv" )
+#write.csv(samp_event,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/MACRO_SAMP_INF_2023_processed_11_5_24_KAR.csv")
+
+#combine deer river and 2023 samples and re-save
+event_2023<-read.csv("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/MACRO_SAMP_INF_2023_processed_11_5_24_KAR.csv")
+event_deer<-read.csv("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/20241007_S_MACRO_SAMP_INF_HIST_deer_river.csv")
+#add missing group column (not used for streams)
+event_deer$MSSIH_GROUP<-""
+
+#bind them
+final_event<-rbind(event_2023,event_deer) #good they match
+final_event$X<-NULL
+
+#write to folder and move the archive that was the originals to another folder (archive)
+#write.csv(final_event,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_sample_inf.csv")
+
+#read in th two metric files
+metrics_2023<-read.csv("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/METRICS_2023_processed_11_5_24_KAR.csv")
+metrics_deer<-read.csv("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/20241007_METRICS_deer_river.csv")
+
+#bind them, these have differing columns bc of hte metric differences
+final_metrics<-dplyr::full_join(metrics_2023,metrics_deer)
+
+#join a couple fields to the metrics file 
+cols<-final_event %>% 
+  select(MSSIH_BIOSAMPLE_COLLECT_METHOD,
+         MSSIH_BIOSAMPLE_COLLECT_METHOD_NUM,
+         MSSIH_EVENT_SMAS_HISTORY_ID,
+         MSSIH_EVENT_SMAS_SAMPLE_DATE,
+         MSSIH_REPLICATE,
+         MSSIH_GROUP,
+         MSSIH_LINKED_ID_VALIDATOR)
+#rename missing column for join
+final_metrics$MSSIH_LINKED_ID_VALIDATOR<-final_metrics$MMDH_LINKED_ID_VALIDATOR
+
+final_metrics_2<-left_join(final_metrics,cols,
+                           by = "MSSIH_LINKED_ID_VALIDATOR")
+final_metrics_2$EVENT_ID<-NULL #remove the event id as it's not in the right format - it's the output from the BAP package
+
+#write to folder and move the archive that was the originals to another folder (archive)
+#write.csv(final_metrics_2,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_metrics.csv")
+
+
+```
+Convert data to new format using Zach's code
+https://github.com/BWAM/data_warehouse_prep/blob/main/R/s_macro_metrics.R
+
+
+Prep the macro sample file for the WQMA database; for now we can create a dummy s_event file since we do not have it yet (as of 11/6/24)
+However, for 2023 it appears they are in the the DB already - so i will grab it
+
+```{r grab-event-table}
+
+
+#check to see if the sites are already in there
+obt_result_dir <- file.path(
+  "L:",
+  "DOW",
+  "BWAM Share",
+  "data",
+  "parquet",
+  "analytical_table_store",
+  "obt_result.parquet"
+)
+
+#collect unique stream sites/dates
+
+stream_df <- open_dataset(obt_result_dir) |> 
+  filter(WATERBODY_TYPE %in% "river_stream") |>
+  distinct(WATERBODY_TYPE, SITE_CODE) |>
+  collect()
+
+streams_sites<-unique(stream_df$SITE_CODE)
+
+setdiff(sites.metrics,streams_sites)
+
+#these may be adjusted when we get the new site ID's from teh survey information
+
+#unique sites/dates
+stream_df_datetime <- open_dataset(obt_result_dir) |> 
+  filter(WATERBODY_TYPE %in% "river_stream") |>
+  distinct(WATERBODY_TYPE, SITE_CODE,EVENT_ID,EVENT_DATETIME) |>
+  collect()
+
+
+s_event_2023<-stream_df_datetime %>% 
+  mutate(event_id = EVENT_ID,
+         year = lubridate::year(EVENT_DATETIME)) %>% 
+  filter(year >= 2023)
+
+#looks like deer river will not match - these are not in the db yet
+
+
+
+```
+
+This is more functions from the WQMA workup from Zach, i'll leave them in for now, and we can update as needed
+
+```{r}
+
+
+correct_site_name <- function(df, vars) {
+  final_df <- df |>
+    dplyr::mutate(
+      dplyr::across(
+        {{vars}},
+        site_corrections
+      ),
+      .before = everything()
+    )
+}
+
+site_corrections <- function(col) {
+  stringr::str_replace_all(
+    col,
+    c("12-SAUQ-2.2" = "12-SAUQ-1.7",
+      "13-LHUD-105" = "13-LHUD-105.0",
+      "14-LBEV-0.1" = "14-LBEV_T03-0.1",
+      "14-LBEV-0.4" = "14-LBEV_T01-0.4",
+      "14-LBEV-0.3" = "14-LBEV_T04-0.3",
+      "11-TWNS-0.2" = "11-STEB-0.2",
+      "11-TWNS-1.1" = "11-STEB-1.1",
+      "06-BIBS-0.3" = "06-JENC-0.3",
+      "06-BIBS-6.6" = "06-JENC-6.6",
+      "12-BATV-11.5" = "12-MITB-0.1",
+      "13-BVRD-0.8" = "13-SHIR-0.8",
+      "13-BVRD-1.0" = "13-SHIR-1.0",
+      "13-BVRD-2.8" = "13-SHIR-2.8",
+      "13-BVRD-4.8" = "13-SHIR-4.8",
+      "05-CAMP- 1.5" = "05-CAMB-1.5",
+      "06-FABS-5.0" = "06-TOLF-1.8",
+      "12-SCHE-0.6" = "12-BRWC-0.6",
+      "12-SCHE-0.8" = "12-COWC-0.8",
+      "05-SEEL-0.5" = "05-MLIC-0.5",
+      "11-SNOK-0.3" = "11-SNOK_L-0.3",
+      "13-TACK-0.1" = "13-SPAR_T10-0.1",
+      "06-CATH_T9_3a-0.5" = "05-CATH_T9_3a-0.5",
+      "07-SKAT_1-0.2" = "07-SKAT_T89-0.2",
+      "07-CAYG_2-1.1" = "07-CAYG-1.1",
+      "07-BSWP_1.3" = "07-BSWP-1.3",
+      "13-LINK-2.3" = "15-LINK-2.3",
+      "07-GROU_1-1.5" = "07-GROU-1.5",
+      "04-BAKE-0.3" = "04-BKER-0.3",
+      "07-BLKC-2.8" = "11-BLKC-2.8",
+      "07-BLCK-2.8" = "11-BLKC-2.8",
+      "07-BUTN-0.6" = "07-BTNC-0.6",
+      "14-COLE-0.4" = "14-CCLV-0.4",
+      "05-CRAN-0.1" = "05-CRBP-0.1",
+      "07-DEAN-1.9" = "07-DNCR-1.9",
+      "07-FISC-1.3" = "07-FSHR-1.3",
+      "10-JACK-0.2" = "10-JKBR-0.2",
+      "08-LIME-6.7" = "08-LMKN-6.7",
+      "13-SILV-4.5" = "13-SILS-4.5",
+      "04-COHO_T41-0.1" = "05-COHO_T41-0.1",
+      "07-SPRN_T7-0.1" = "04-SPRN_T7-0.1",
+      "07-SENP_T32-0.6" = "04-SENP_T32-0.6",
+      "07-MUDG_T72-0.3" = "04-MUDG_T72-0.3",
+      "12-DWAS-7.2" = "11-DWAS-7.2",
+      "04-GRIM-6.3" = "07-GRIM-6.3",
+      "02-JNSN-2.3" = "03-JNSN-2.3",
+      "02-MUDC-0.4" = "03-MUDC-0.4",
+      "04-TNCR-3.7" = "05-TNCR-3.7",
+      "03-WCAN-73.0" = "04-WCAN-73.0",
+      "95-COHO-28.6" = "05-COHO-28.6",
+      "04-SXML-2.2" = "07-SXML-2.2",
+      "12-HVLY-0.5" = "12-HLVY-0.5",
+      "11-UHUD-42.5" = "11-UHUD-43.1",
+      "12-MOHK-3.7" = "12-MOHK-1.5",
+      "05-CHAU-14.9" = "01-CHAU-14.9",
+      "05-TOGA-1.5" = "05-TOGA-1.3",
+      "13-SPAR_T96-01" = "13-SPAR_T9b-0.1",
+      "13-TINW-4.55" = "13-TINW-4.5",
+      "13TINW-4.5" = "13-TINW-4.5",
+      "13TINW-6.5" = "13-TINW-6.5",
+      "15-DEFT_T1-0.5" = "15-DEFT_T1-0.1",
+      "15-DEFT_T1-0.2" = "15-DEFT_T1-0.1",
+      "13-STNY-8.1" = "13-STNY-10.0",
+      "14-GOUL-0.9" = "14-COUL-0.9",
+      "12-NORT-1.7" = "12-NORT-2.3",
+      "05-CHAU-4.2" = "05-CHAU-4.0",
+      "02-CLER_T6-3.1" = "02-TWTY-3.1",
+      "12-STLE-0.8" = "12-STLE-0.2",
+      "13-BRNX-5.6" = "17-BRNX-5.6",
+      "11-LRNC_21-20.2" = "11-UHUD-64.4",
+      "11-UHUD-14.7" = "11-UHUD-14.8",
+      "11-UHUD-27.5" = "11-UHUD-27.4",
+      "11-UHUD-32.1" = "11-UHUD-32.4",
+      "11-UHUD-39.5" = "11-UHUD-40.1",
+      "11-UHUD-39.8" = "11-UHUD-40.3",
+      "11-UHUD-42.5" = "11-UHUD-43.1",
+      "11-UHUD-51.0" = "11-UHUD-51.3",
+      "11-UHUD-64.0" = "11-UHUD-64.2",
+      "11-UHUD-98.3" = "11-UHUD-98.7",
+      "11-UHUD-267.8" = "11-UHUD-106.3",
+      "11-UHUD-273.0" = "11-UHUD-111.6",
+      "11-UHUD-284.9" = "11-UHUD-124.2",
+      "11-UHUD-286.0" = "11-UHUD-124.7",
+      "11-XHR-273.0" = "11-UHUD-111.6",
+      "11-XHR-277.0" = "11-UHUD-115.6",
+      "11-XHR-282.3" = "11-UHUD-120.9",
+      "11-XHR-285.0" = "11-UHUD-124.3",
+      "11-XHR-286.6" = "11-UHUD-125.3",
+      "13-LHUD-25.8" = "13-LHUD-5.7",
+      "13-LHUD-35.0" = "13-LHUD-14.7",
+      "13-LHUD-39.7" = "13-LHUD-19.5",
+      "13-LHUD-50.3" = "13-LHUD-47.5",
+      "13-LHUD-50.59" = "13-LHUD-47.8",
+      "13-LHUD-50.6" = "13-LHUD-47.9",
+      "13-LHUD-50.61" = "13-LHUD-47.9",
+      "13-LHUD-66.3" = "13-LHUD-63.6",
+      "13-LHUD-67.3" = "13-LHUD-64.6",
+      "13-LHUD-89.3" = "13-LHUD-88.7",
+      "13-LHUD-104.6" = "13-LHUD-105",
+      "13-LHUD-119.6" = "13-LHUD-124.9",
+      "13-LHUD-120.2" = "13-LHUD-125.5",
+      "13-LHUD-124.1" = "13-LHUD-128.9",
+      "13-LHUD-125.8" = "13-LHUD-130.6",
+      "13-LHUD-133.4" = "13-LHUD-140.1",
+      "13-LRNC_22-89.3" = "13-LHUD-88.6",
+      "13-LRNC_63-133.4" = "13-LHUD-140.1",
+      "13-LRNC_66-119.6" = "13-LHUD-124.9",
+      "03-YANT_T1C-0.2" = "03-YANT_T1c-0.2",
+      "17-GSCK_TA-0.1" = "17-GSCK_Ta-0.1",
+      "07-SKAT_T93A-0.5" = "07-SKAT_T93a-0.5",
+      "06-SANG_TB-0.1" = "06-SANG_Tb-0.1",
+      "05-CATH_T9_3A-0.5" = "05-CATH_T9_3a-0.5",
+      "07-SKAT_T93A-0.5" = "07-SKAT_T93a-0.5",
+      "14-CALL_E_T13A-0.1" = "14-CALL_E_T13a-0.1",
+      "09-STLW_T46A-0.1" = "09-STLW_T46a-0.1",
+      "07-SKAT_T93A-0.5" = "07-SKAT_T93a-0.5",
+      "12-SCHO_T93_B-1.8" = "12-SCHO_T93_b-1.8",
+      "13-SPAR_T9B-0.1" = "13-SPAR_T9b-0.1",
+      "17-BLND_TB-2.0" = "17-BLND_Tb-2.0",
+      "17-KENF_TA-0.2" = "17-KENF_Ta-0.2",
+      "07-KDIG_TB-0.7" =  "07-KDIG_Tb-0.7",
+      "17-KENF_TA-0.2" = "17-KENF_Ta-0.2",
+      "17-BLND_TB-2.0" = "17-BLND_Tb-2.0",
+      "17-KENF_TA-0.2" = "17-KENF_Ta-0.2",
+      "17-BLND_TB-2.0" = "17-BLND_Tb-2.0",
+      "13-SPAR_T9B-0.1" = "13-SPAR_T9b-0.1",
+      "02-WRGT_TA-1.8" = "02-WRGT_Ta-1.8",
+      "13-LHUD-47.91" = "13-LHUD-47.9",
+      "05-MILD_T7-0.3" = "04-MILD_T7-0.3"
+      # "11-UHUD-43.1",
+      # "13-PATS-0.5",
+      # "13-PATS-1.3",
+      # "13-PATS-1.8",
+      # "12-SAUQ-1.7",
+      # "12-POEN-2.0",
+    )
+  )
+}
+
+macro_event_corrections <- function(df) {
+  mutate(
+    df,
+    event_id = case_match(
+      event_id,
+      "12-MOYR-5.1_20100729" ~ "12-MOYR-5.1_20100728",
+      "12-OTSO -1.1_20200714" ~ "12-OTSO-1.1_20200714",
+      "01-LBUF-2.5_20200917" ~ "01-LBUF-2.5_20200915",
+      "02-WFREN_T12-0.2_20210915" ~ "02-WFREN_T12-0.5_20210915",
+      "1-BUFF-1.7_20200902" ~ "1-BUFF-1.7_20200901",
+      "01-BUFF-1.7_20200902" ~ "01-BUFF-1.7_20200901",
+      "11-WBLA-0.9_20210803" ~ "11-WBLA-0.9_20210805",
+      "04-UGNS-139.6_20220929" ~ "04-UGNS-139.6_20220921",
+      "05-COHO_T1-0.1_20220830" ~ "05-COHO_T1-0.1_20220831",
+      "05-FIVM-13.0_20220830" ~ "05-FIVM-13.0_20220831",
+      "05-STEO_T22-0.2_20220830" ~ "05-STEO_T22-0.2_20220831",
+      "06-SUSQ-36.9_20220713" ~ "06-SUSQ-36.9_20220712",
+      "08-FALK-0.3_20220914" ~ "08-FALK-0.3_20220915",
+      "08-MILE-0.7_20220914" ~ "08-MILE-0.7_20220915",
+      "08-TANE-0.7_20220913" ~ "08-TANE-0.7_20220914",
+      "13-SPAR-3.6_20220714" ~ "13-SPAR-3.6_20220719",
+      "12-SPIT-2.3_20210723" ~ "12-SPIT-2.3_20200723",
+      "12-WESK-0.1_20200716" ~ "12-WESK_T5-0.1_20200716",
+      "07-CANO-2.3_20210721" ~ "07-CANO-0.8_20210721",
+      "07-DEAN-0.1_20210721" ~ "07-DEAN-1.9_20210721",
+      "13-ESOP-4.4_20220720" ~ "13-ESOP-4.8_20220720",
+      # "13-POST-0.8_20220719" ~ "13-POST-18.4_20220719",
+      # "13-ROND-9.2_20220719" ~ "13-ROND-32.2_20220719",
+      "13-TIOR-0.2_20220720" ~ "13-TIOR-0.1_20220720",
+      "07-FISC-0.1_20210722" ~ "07-FISC-1.3_20210722",
+      "07-POTT-0.7_20210831" ~ "07-POTT-0.1_20210831",
+      "07-RHCR-0.8_20210713" ~ "07-RHCR-0.7_20210713",
+      "07-RHCR-0.8_20210901" ~ "07-RHCR-0.7_20210901",
+      "11-UHUD-125.3_20210803" ~ "11-UHUD-124.7_20210803",
+      "01-CHAU-4.2_20220922" ~ "01-CHAU-4.0_20220922",
+      "05-CDEA-11.4_20220831" ~ "05-CDEA-11.5_20220831",
+      "05-CHEM-33.8_20220830" ~ "05-CHEM-33.6_20220830",
+      "05-COHO-1.4_20220830" ~ "05-COHO-1.5_20220830",
+      "05-PURD-0.1_20220831" ~ "05-PURD-0.2_20220831",
+      # "05-TRPS-9.5_20220901" ~ "05-TRPS-7.0_20220901",
+      "08-BLCK-30.0_20220802" ~ "08-BLCK-30.4_20220802",
+      "08-LIME-6.3_20220914" ~ "08-LIME-6.7_20220914",
+      "08-WHET-4.8_20220914" ~ "08-WHET-4.9_20220914",
+      "11-XHR-296.0_20210803" ~ "11-UHUD-296.7_20210803",
+      "05-MDCR-10.0_20220821" ~ "05-MDCR-10.0_20220831",
+      "05-MEAD-10.8_20220831" ~ "05-MEAD-10.9_20220830",
+      "07-VENS-1.8_20210722" ~ "07-VENE-1.5_20210722",
+      "03-LSTN-1.0_20200801" ~ "03-LSTN-1.0_20200819",
+      "08-ADKS_36-0.5_20220914" ~ "08-ADKS_36-0.6_20220914",
+      "08-BLCK_T132-2.0_20220915" ~ "08-BLCK_T132-1.8_20220915",
+      "09-BRND-2.5_20210728" ~ "09-BRND-1.6_20210728",
+      "09-COLE-2.9_20210727" ~ "09-COLE-3.6_20210727",
+      "09-COLE-4.6_20210727" ~ "09-COLE-4.2_20210727",
+      "12-FOX-1.1_20220809" ~ "12-FOX-1.1_20220810",
+      "13-LHUD_T299-2.5_20220720" ~ "13-LHUD_T229-2.5_20220720",
+      "13-WFKIL-0.1_20220721" ~ "13-WFKIL-0.4_20220721",
+      "16-SUSQ-25.2_20220712" ~ "06-SUSQ-25.2_20220712",
+      .default = event_id
+    )
+  ) 
+}
+
+```
+
+
+```{r}
+
+
+data_dir<-"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores"
+
+standard_read_csv <- function(file, col_types = NULL) {
+  readr::read_csv(
+    file = file,
+    col_types = col_types,
+    na = c("", "NA", "N/A", "n/a", "-9999")
+  )
+}
+
+import_s_macro_sample <- function(data_dir) {
+  standard_read_csv(
+    file = file.path(data_dir,
+                     "2023_all_2024_deer_river_sample_inf.csv"),
+    col_types = cols(
+      MSSIH_EVENT_SMAS_HISTORY_ID = col_character(),
+      MSSIH_EVENT_SMAS_SAMPLE_DATE = col_date(format = "%m-%d-%Y"), #updated the date format here
+      MSSIH_REPLICATE = col_character(),
+      MSSIH_TAXONOMIST = col_character(),
+      MSSIH_BIOSAMPLE_COLLECT_METHOD = col_character(),
+      MSSIH_TOTAL_INDIV_CNT = col_double(),
+      MSSIH_GROUP = col_character()
+    )
+  )
+}
+
+prep_s_macro_sample <- function(x, s_event) {
+  x |> 
+    distinct(
+      site_id = MSSIH_EVENT_SMAS_HISTORY_ID,
+      sample_date = MSSIH_EVENT_SMAS_SAMPLE_DATE,
+      replicate = MSSIH_REPLICATE,
+      taxonomist = MSSIH_TAXONOMIST,
+      collection_method = MSSIH_BIOSAMPLE_COLLECT_METHOD,
+      total_individual_count = MSSIH_TOTAL_INDIV_CNT,
+      sample_group = MSSIH_GROUP
+    ) |> 
+    mutate(sample_date = format(sample_date, "%Y%m%d"),
+           #kar addition)
+           event_id = paste(site_id,sample_date,sep = "_"))|> 
+    mutate(sample_group = case_when(
+      grepl("[a-zA-Z]", replicate) ~ glue::glue("{sample_group}_{replicate}"),
+      .default = sample_group
+    ),
+    replicate = as.numeric(stringr::str_remove_all(replicate,
+                                                   "[a-zA-Z]"))
+    ) |> 
+    #kar hashed out since we're missing the time
+    # tidyr::unite(
+    #   "event_id",
+    #   site_id,
+    #   sample_date
+    # ) |> 
+    macro_event_corrections() |> 
+    correct_site_name(
+      vars = "event_id"
+     ) 
+  #|> 
+    # semi_join(s_event,
+    #           by = "event_id")
+ 
+  
+}
+
+#run the functions
+imported_sample<-import_s_macro_sample(data_dir)
+prepped_sample_table<-prep_s_macro_sample(imported_sample,s_event = s_event_2023)
+
+```
+
+
+Then prep the metrics file
+
+```{r}
+
+import_s_macro_metrics <- function(data_dir) {
+  standard_read_csv(
+    file = file.path(data_dir,
+                     "2023_all_2024_deer_river_metrics.csv"),
+           col_types = cols(
+             MMDH_RICHNESS = col_double(),
+             MMDH_RICHNESS_SCORE = col_double(),
+             MMDH_EPT_RICH = col_double(),
+             MMDH_EPT_SCORE = col_double(),
+             MMDH_HBI_INDEX = col_double(),
+             MMDH_HBI_SCORE = col_double(),
+             MMDH_SHANNON = col_double(),
+             MMDH_SHANNON_SCORE = col_double(),
+             MMDH_BIO_ASMT_PROFILE_SCORE = col_double(),
+             MMDH_PCT_MODEL_AFFINITY = col_double(),
+             MMDH_PCT_MODEL_AFFINITY_SCORE = col_double(),
+             MMDH_NUTRIENT_BIOTIC_INDEX_P = col_double(),
+             MMDH_NBI_P_SCORE = col_double(),
+             MMDH_NCO_RICH = col_double(),
+             MMDH_NCO_RICH_SCORE = col_double(),
+             MMDH_PCT_DOMINANCE_3 = col_double(),
+             MMDH_PCT_DOMINANCE_3_SCORE = col_double(),
+             MSSIH_BIOSAMPLE_COLLECT_METHOD = col_character(),
+             MSSIH_BIOSAMPLE_COLLECT_METHOD_NUM = col_double(),
+             MSSIH_EVENT_SMAS_HISTORY_ID = col_character(),
+             MSSIH_EVENT_SMAS_SAMPLE_DATE = col_date(format = "%m-%d-%Y"), #updated from "%m/%d/%Y" by KAR
+             MSSIH_REPLICATE = col_double(),
+             MSSIH_GROUP = col_character()
+           ))
+}
+
+prep_s_macro_metrics <- function(x, s_event, s_macro_sample) {
+  S_MACRO_METRICS_final <- x |> 
+    distinct(
+      #kar updates
+      site_id = site_id,
+      date = MSSIH_EVENT_SMAS_SAMPLE_DATE,
+      collection_method = MSSIH_BIOSAMPLE_COLLECT_METHOD,
+      replicate = MSSIH_REPLICATE,
+      sample_group = MSSIH_GROUP,
+      score_bioassessment_profile = MMDH_BIO_ASMT_PROFILE_SCORE,
+      raw_richness = MMDH_RICHNESS,
+      score_richness = MMDH_RICHNESS_SCORE,
+      raw_ept_richness = MMDH_EPT_RICH,
+      score_ept_richness = MMDH_EPT_SCORE,
+      raw_hilsenhoff_biotic_index = MMDH_HBI_INDEX,
+      score_hilsenhoff_biotic_index = MMDH_HBI_SCORE,
+      raw_shannon_diversity = MMDH_SHANNON,
+      score_shannon_diversity = MMDH_SHANNON_SCORE,
+      raw_percent_model_affinity = MMDH_PCT_MODEL_AFFINITY,
+      score_percent_model_affinity = MMDH_PCT_MODEL_AFFINITY_SCORE,
+      raw_nutrient_biotic_index_phosphorus = MMDH_NUTRIENT_BIOTIC_INDEX_P,
+      score_nutrient_biotic_index_phosphorus = MMDH_NBI_P_SCORE,
+      raw_non_chiro_oligo_richness = MMDH_NCO_RICH,
+      score_non_chiro_oligo_richness = MMDH_NCO_RICH_SCORE,
+     # raw_percent_dominance_3 = MMDH_PCT_DOMINANCE_3,
+      #score_percent_dominance_3 = MMDH_PCT_DOMINANCE_3_SCORE
+    ) |> 
+    mutate(date = format(date, "%Y%m%d")) |> 
+    tidyr::unite(
+      "event_id",
+      site_id,
+      date
+    ) |> 
+    mutate(
+      collection_method = case_match(
+        collection_method,
+        "Sediment_Ponar" ~ "Sediment Ponar",
+        .default = collection_method
+      )
+    ) |> 
+    macro_event_corrections() |> 
+    correct_site_name(
+      vars = "event_id"
+    ) |> 
+    # semi_join(s_event,
+    #           by = "event_id") |> #updated by KAR, since we dont have the times
+    left_join(
+      s_macro_sample,
+      by = join_by(event_id, collection_method, replicate, sample_group)
+    ) |> 
+    select(-taxonomist) |> 
+    distinct() |> 
+    tidyr::pivot_longer(
+      cols = c(score_bioassessment_profile:score_non_chiro_oligo_richness,total_individual_count),
+      names_to = "metric_name",
+      values_to = "metric_value",
+      values_drop_na = TRUE
+    ) |> 
+    mutate(
+      metric_type = case_when(
+        grepl("raw", metric_name) ~ "raw",
+        grepl("score", metric_name) ~ "score",
+        grepl("total_individual_count", metric_name) ~ "raw",
+        .default = NA_character_
+      ),
+      metric_name = stringr::str_remove_all(
+        metric_name,
+        pattern = "raw_|score_"
+      )
+    )
+  
+  S_MACRO_METRICS_standard <- S_MACRO_METRICS_final |> 
+    rename(parameter_name = metric_name,
+           result_value = metric_value,
+           unit = metric_type) |> 
+    select(-sample_group) |> 
+    mutate(activity_type = "macroinvertebrate_metrics",
+           sample_type = "calculated",
+           sample_source = "bap_r_package",
+           sampling_location = "unknown",
+           lab_name = "not_applicable",
+           organization_name = "NYSDEC",
+           unit = stringr::str_replace_all(unit, "score", "score_0-10"),
+           replicate = as.character(replicate),
+           parameter_description = assign_s_biosurvey_parameter_description(
+             x = parameter_name
+           )
+    )
+  
+ 
+}
+
+assign_s_biosurvey_parameter_description  <- function(x) {
+  dplyr::case_match(
+    x,
+    "bioassessment_profile" ~ "The Biological Assessment Profile (BAP) of index values is a method of plotting individual biological comunity metrics on a common scale of water quality impact. Individual metrics from those described previously are converted to a common 10-scale based on a series of equations. The combination of metrics used differs based on the type of sample collected and the habitat from which the sample was taken. The mean scale value of the indices represents the assessed impact for each site",
+    "richness" ~ "This is the total number of species or taxa found in the sample. Higher species richness values are mostly associated with clean-water conditions.",
+    "ept_richness" ~ "EPT denotes the total number of species of mayflies (Ephemeroptera), stoneflies (Plecoptera), and caddisflies (Trichoptera) found in a subsample. These are considered to be mostly clean-water organisms in flowing waters, and their presence generally is correlated with good water quality.",
+    "hilsenhoff_biotic_index" ~ "The Hilsenhoff Biotic Index is calculated by multiplying the number of individuals of each species by its assigned tolerance value, summing these products, and dividing by the total number of individuals. On a 0-10 scale, tolerance values range from intolerant (0) to tolerant (10). Toleracane values are mostly from Hilsenhoff (1987), but some have been recalibarated based on NYS datasets. High HBI values are indictive of organic (sewage) pollution, while low values indicate lack of sewage effects.",
+    "shannon_diversity" ~ "Species diversity is a value that combines species richness and community balance (evenness). Shannon-Wiener diversity values are calculated using the formula in Weber (1973). High species diversity values usually indicate diverse, well-balanced communities, while low values indicate stress or impact.",
+    "total_individual_count" ~ "The total number of individuals enumerated. Multiplate samples represent density estimates.",
+    "percent_model_affinity" ~ "The Percent Model Affinity for taxonomic group composition is a measure of similarity to a model non-impacted community based on percent abundance in 7 major groups (Novak and Bode, 1992). Percentage similarity as calculated in Washington (1987) is used to measure similarity. Models are descriped in SOP 216.",
+    "nutrient_biotic_index_phosphorus" ~ "The Nutrient Biotic Index (Smith et al., 2007) is a diagnostic measure of stream nutrient enrichment identified by macroinvertebrate taxa. The frequency of occurrences of taxa at varying nutrient concentrations allowed the identification of taxon-specific nutrient optima using a method of weighted averaging. The assignment of tolerance values to taxa based on their nutrient optimum provided the ability to reduce macroinvertebrate community data to a linear scale of eutrophication from oligotrophic to eutrophic. Two tolerance values were assigned to each taxon, one for total phosphorus, and one for nitrate. This provides the ability to calculate two different nutrient biotic indices, one for total phosphorus (NBI-P), and one for nitrate (NBI-N). Study of the indices indicate better performance by the NBI-P, with strong correlations to stream nutrient concentrations and diatom communities.",
+    "non_chiro_oligo_richness" ~ "Non-Chironomidae and Oligochaeta (NCO) Richness denotes the total number of species of organisms other than those in the groups Chironomidae and Oligochaeta. Since Chironomidae and Oligochaeta are generally the most abundant groups in impacted communities, NCO taxa are considered to be less pollution tolerant, and their presence would be expected to be more indicative of good water quality. This measure is the Sandy Stream counterpart of EPT richness.",
+    "percent_dominance_3" ~ "Dominance is a measure of community balance, or evenness of the distribution of individuals among the species. Simple dominance is the percent contribution of the most numerous species. Dominance-3 (rivers and streams) is the combined percent contribution of the three most numerous taxa.",
+    .default = NA_character_
+  )
+}
+
+imported_metrics<-import_s_macro_metrics(data_dir)
+prepped_metrics<-prep_s_macro_metrics(imported_metrics, s_event_2023, prepped_sample_table)
+
+```
+
+Write these to the staging area
+
+```{r}
+
+write.csv(prepped_metrics,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/s_macro_metrics_2023_needs_time_on_event_id_11_6_24.csv")
+write.csv(prepped_sample_table,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/s_macro_sample_2023_needs_time_on_event_id_11_6_24.csv")
+
+```
+

@@ -10,7 +10,8 @@ waa_data_prep<-function(df){
            MSSIH_EVENT_SMAS_SAMPLE_DATE,
            MSDH_GENSPECIES,
            MSDH_INDIVIDUAL_SPECIES_CNT,
-           MSSIH_TOTAL_INDIV_CNT_IND
+           MSSIH_TOTAL_INDIV_CNT_IND,
+           group
            )
  prepped_df2 <- cbind(prepped_df, stringr::str_split_fixed(prepped_df$MSSIH_EVENT_SMAS_HISTORY_ID,"-",3))
 
@@ -60,8 +61,10 @@ m_data_prep<-function(df){
            COLL_DATE=DATE,
            MACRO_GENSPECIES=GENSPECIES)
   
-  prepped_df$Replicate<-prepped_df$MSSIH_REPLICATE
-  prepped_df$INDIV<-(as.numeric(prepped_df$MSDH_INDIVIDUAL_SPECIES_CNT))
+  #prepped_df$MSSIH_REPLICATE<-prepped_df$Replicate
+  
+  #prepped_df$MSDH_INDIVIDUAL_SPECIES_CNT<-(as.numeric(prepped_df$INDIV))
+  #might need the hashed lines in teh future
   
  .GlobalEnv$prepped_df <- prepped_df
 }
@@ -73,7 +76,8 @@ species_check<-function(df){
   
   #read in master file
   #read in the master table
-  master<-read.csv(paste("C:/Users/",params$user,"/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/Cleaned Files/Final_Macro_ITS/20210617_S_MSTR_MACRO_SPECIES.csv",sep = ""),stringsAsFactors = FALSE)
+  master<-read.csv("L:/DOW/BWAM Share/data/streams/cleaned_files/Final_Macro_ITS/20210617_S_MSTR_MACRO_SPECIES.csv",
+                    stringsAsFactors = FALSE)
   
   #Make all characters lowercase and remove unwanted characters in both files.
   
@@ -124,15 +128,16 @@ species_check<-function(df){
   
   #Creating a csv output for the species found that aren't in the master list.
   
-  if (nrow(new_species>0)){ write.csv(new_species,
-            "outputs/newly_found_species.csv",
+  if (nrow(new_species)>0){ write.csv(new_species,
+            here::here("outputs/newly_found_species.csv"),
             row.names = FALSE)
+    print("There are new species in this file. Check the outputs folder for newly_found_species.csv")
   }
   
   #Creating a csv output for the double check, looking through all taxonomic levels for the classifications not found in the master list.
   
-  if (nrow(new_species>0)){write.csv(double_check,
-            "output/double_check.csv",
+  if (nrow(double_check)>0){write.csv(double_check,
+            here::here("outputs/double_check.csv"),
             row.names = FALSE)}
   
   
@@ -142,7 +147,8 @@ species_check<-function(df){
 tables_1_2<-function(df){
 tables<-df
 
-tables$COLL_DATE<-as.Date(tables$COLL_DATE, "%m/%d/%Y")
+#tables$COLL_DATE<-as.Date(tables$COLL_DATE, "%m-%d-%Y")
+tables$COLL_DATE<-as.Date(tables$COLL_DATE, "%m/%d/%Y") 
 #create species event table
 tables$date<-format(tables$COLL_DATE,"%Y%m%d")
 tables<-tables %>% 
@@ -151,9 +157,10 @@ tables<-tables %>%
   mutate(MSSIH_TOTAL_INDIV_CNT_NOTE="") %>% 
   mutate(Taxonomist_name=paste("SBU")) %>% 
   rename(MSSIH_TAXONOMIST=Taxonomist_name,
-         MSSIH_REPLICATE=Replicate,
-         MSSIH_EVENT_SMAS_HISTORY_ID=site_id,
-         BIOSAMPLE_COLLECT_METHOD_NUM=COLLECT
+         #MSSIH_REPLICATE=Replicate,
+        # MSSIH_EVENT_SMAS_HISTORY_ID=site_id,
+         BIOSAMPLE_COLLECT_METHOD_NUM=COLLECT,
+        MSSIH_GROUP = group
          )
 
 
@@ -187,7 +194,8 @@ samp_event<-tables %>%
          MSSIH_TAXONOMIST,
          MSSIH_TOTAL_INDIV_CNT_NOTE,
          BIOSAMPLE_COLLECT_METHOD,
-         MSSIH_TOTAL_INDIV_CNT) %>% 
+         MSSIH_TOTAL_INDIV_CNT_IND,
+         MSSIH_GROUP) %>% 
   distinct()
 
 species_history<-tables %>% 
@@ -202,8 +210,14 @@ species_history<-tables %>%
 time=Sys.Date()
 time.t=format(time,"%Y%m%d")
 
+#set NA's to blank
+species_history[is.na(species_history)] <- ""  
+
 write.csv(species_history,paste(here::here(),"/outputs/",
                                 time.t,"_S_MACRO_SPECIES_DATA_HISTORY.csv",sep = ""))
+#set NA's to blank
+samp_event[is.na(samp_event)] <- ""  
+
 write.csv(samp_event,paste(here::here(),"/outputs/",
                            time.t,"_S_MACRO_SPECIES_SAMP_INF_HIST.csv",sep = ""))
 
@@ -261,12 +275,16 @@ metric_table<-function(df){
     distinct() %>% 
     dplyr::rename(site_id=MSSIH_EVENT_SMAS_HISTORY_ID)
   
-  metrics$DATE<-as.Date(metrics$DATE,"%Y-%m-%d")
-  
+  #metrics$DATE<-as.Date(metrics$DATE,"%m/%d/%Y")
+  # metrics$DATE<-as.Date(metrics$DATE,"%m-%d-%Y")
+  #metrics$DATE<-as.Date(metrics$COLL_DATE,"%m/%d/%Y")
+  metrics$DATE<-lubridate::parse_date_time(metrics$DATE,
+                                           orders= c("%m/%d/%Y","%m-%d-%Y"))
+   
   metrics<-metrics %>% #make the validation id
     mutate(BASIN=stringr::str_pad(BASIN,2,side = c("left"),pad = "0")) %>% 
-    mutate(RIVMILE=as.numeric(RIVMILE,digits=2)) %>% 
-    mutate(site_id=paste(BASIN,LOCATION,sprintf("%.1f",RIVMILE),sep = "-")) %>% 
+    mutate(RIVMILE=paste(RIVMILE)) %>% 
+    mutate(site_id=paste(BASIN,LOCATION,RIVMILE,sep = "-")) %>% 
     mutate(date=format(DATE,"%Y%m%d"))#format date for tehe linked validator
   
   metrics<-merge(metrics,collect,by="site_id",
@@ -275,24 +293,25 @@ metric_table<-function(df){
   
   #rename columns and create validator ID
   metrics<-metrics %>% 
-    mutate(REP=right(EVENT_ID,1),
-      MMDH_LINKED_ID_VALIDATOR=paste(site_id,date,COLLECT,REP,sep="_")
-)
+    mutate(REPLICATE=right(EVENT_ID,1),
+      MMDH_LINKED_ID_VALIDATOR=paste(site_id,date,COLLECT,REPLICATE,sep="_"))
+  
+  #8/23/2024 took this part out since we changed the DB col headers
   #need to make a vec for columns and name changes
   col.vec<-read.csv(here::here("lkp","col_names.csv"),stringsAsFactors = FALSE)
-  
+
   col.from<-colnames(metrics)
-  
-  col.vec.short<- col.vec %>% 
+
+  col.vec.short<- col.vec %>%
     subset(old %in% col.from)
-  
+
   names(metrics)[match(col.vec.short[,"old"], names(metrics))] = col.vec.short[,"new"]
-   
+
   for.table.vec<-unique(col.vec.short$new)
-  
+
   metrics.subset <- metrics[, for.table.vec]
-  
-  metrics.subset<-metrics.subset %>% 
+
+  metrics.subset<-metrics %>% 
     mutate_if(is.numeric, round, 3)
 
   .GlobalEnv$metrics.subset <- metrics.subset 
@@ -301,21 +320,30 @@ metric_table<-function(df){
   time=Sys.Date()
   time.t=format(time,"%Y%m%d")
   
+  metrics.subset[is.na(metrics.subset)] <- ""  
+  
   write.csv(metrics.subset,paste(here::here(),"/outputs/",
-                                  time.t,"_S_MACRO_METRICS_DATA_HISTORY.csv",sep = ""))
+                                  time.t,"_METRICS_WQMA_PREPROCESSED.csv",sep = ""))
 }
 #################################################################################################
 #tables 1-2 for waa data
 tables_1_2.waa<-function(df){
     tables<-df
     
-    tables$COLL_DATE<-as.Date(tables$COLL_DATE, "%m/%d/%Y")
+    #tables$COLL_DATE<-as.Date(tables$COLL_DATE, "%m-%d-%Y")
+    #tables$COLL_DATE<-as.Date(tables$COLL_DATE, "%m/%d/%Y")
+    tables$COLL_DATE<-lubridate::parse_date_time(tables$COLL_DATE,
+                                             orders= c("%m/%d/%Y","%m-%d-%Y"))
+   
     #create species event table
     tables$date<-format(tables$COLL_DATE,"%Y%m%d")
     tables<-tables %>% 
-      mutate(MSSIH_LINKED_ID_VALIDATOR=paste(MSSIH_EVENT_SMAS_HISTORY_ID,date,BIOSAMPLE_COLLECT_METHOD_ID,MSSIH_REPLICATE,sep = "_")) %>% 
-      mutate(MSSIH_EVENT_SMAS_SAMPLE_DATE=format(COLL_DATE,"%m/%d/%Y")) %>% 
-      mutate(MSSIH_TOTAL_INDIV_CNT_NOTE="") %>% 
+      mutate(MSSIH_LINKED_ID_VALIDATOR=paste(MSSIH_EVENT_SMAS_HISTORY_ID,
+                                             date,BIOSAMPLE_COLLECT_METHOD_ID,
+                                             MSSIH_REPLICATE,sep = "_")) %>% 
+      mutate(MSSIH_EVENT_SMAS_SAMPLE_DATE=format(COLL_DATE,"%m-%d-%Y")) %>% 
+      mutate(MSSIH_TOTAL_INDIV_CNT_NOTE="",
+             MSSIH_GROUP = group) %>% 
       mutate(Taxonomist_name=paste("WAA")) %>% 
       dplyr::rename(MSSIH_TAXONOMIST=Taxonomist_name
       )
@@ -323,9 +351,11 @@ tables_1_2.waa<-function(df){
     
     #create sum of samples
     sum<-tables %>% 
-      select(MSSIH_LINKED_ID_VALIDATOR,MSSIH_TOTAL_INDIV_CNT_IND) %>% 
+      select(MSSIH_LINKED_ID_VALIDATOR,
+             MSSIH_TOTAL_INDIV_CNT_IND) %>% 
       group_by(MSSIH_LINKED_ID_VALIDATOR) %>% 
-      summarise(MSSIH_TOTAL_INDIV_CNT=max(MSSIH_TOTAL_INDIV_CNT_IND))
+      summarise(MSSIH_TOTAL_INDIV_CNT=max(MSSIH_TOTAL_INDIV_CNT_IND)) #did max because waa
+    #lists it and i wnated to make sure that i didn't sum the totals
     
     #merge back
     tables<-merge(tables,sum, by="MSSIH_LINKED_ID_VALIDATOR")
@@ -341,11 +371,14 @@ tables_1_2.waa<-function(df){
              MSSIH_TAXONOMIST,
              MSSIH_TOTAL_INDIV_CNT_NOTE,
              MSSIH_BIOSAMPLE_COLLECT_METHOD,
-             MSSIH_TOTAL_INDIV_CNT) %>% 
+             MSSIH_TOTAL_INDIV_CNT,
+             MSSIH_GROUP) %>% 
       distinct()
     
     species_history<-tables %>% 
-      select(MSSIH_LINKED_ID_VALIDATOR,MSSIH_TOTAL_INDIV_CNT,MACRO_GENSPECIES) %>% 
+      select(MSSIH_LINKED_ID_VALIDATOR,
+             MSDH_INDIVIDUAL_SPECIES_CNT,
+             MACRO_GENSPECIES) %>% 
       rename(MSTR_MACRO_SPECIES_ID=MACRO_GENSPECIES,
              MSDH_LINKED_ID_VALIDATOR=MSSIH_LINKED_ID_VALIDATOR) %>% 
       mutate(MSTR_MACRO_SPECIES_ID=tolower(MSTR_MACRO_SPECIES_ID)) %>% 
@@ -376,7 +409,7 @@ site_check<-function(df){
   }
   #read in the site check file
   site_check.f<-readxl::read_excel(paste("C:/Users/",params$user,
-                               "/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/Cleaned Files/Final_Sites_ITS/c2021_Sites_crosswalk_summary_v4_created_20211116.xlsx",
+                               "/OneDrive - New York State Office of Information Technology Services/Streams Data Modernization/Cleaned Files/Final_Sites_ITS/c2021_Sites_crosswalk_summary_v4_created_20211116.xlsx",
                                sep = ""))
   site_check.f<-site_check.f %>% 
     select(SMAS_HISTORY_ID,ORIGINAL_SITE_ID) %>% 
@@ -409,12 +442,21 @@ site_check<-function(df){
   
   
 }
-
+###################################################################################
 event_check<-function(df){
   #checks to see if there are events associated with each record
   
   
 }
-
-
+###################################################################################
+#create final file for WQMA ingestion
+WQMA_prep<-function(df){
+  #needs df - the original raw file, and bap.final from the original BAP script
+  #creates combined file for pre-ingestion in Phase 1 of WQMA integration
+ df<-wqma_bap
+ 
+  
+  
+  
+}
 

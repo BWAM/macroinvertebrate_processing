@@ -1,0 +1,384 @@
+---
+title: "macroinvertebrate_processing_2024_in-house-processed"
+author: 'NYSDEC SMAS : Keleigh Reynolds'
+date: "2/3/2021"
+output: html_document
+params:
+  file_name: "C:/Users/kareynol/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/to_be_cleaned/2021_data/Copy of MacroData_2022.csv"
+  user: kareynol
+  file_type: "internal"
+---
+
+```{r include=FALSE,message=FALSE}
+library(dplyr)
+#runnign the missing patroons data and others from the 2020 file
+
+#file_type options : "waa" or "internal"
+
+#run the functions script
+source("rmd/functions.R")
+```
+
+```{r}
+#first read in the raw file
+#raw<-readxl::read_excel("C:/Users/kareynol/Desktop/R_SMAS/macro_processing_in_house/data/SampData_2018.xlsx")
+
+#raw<-read.csv(here::here(paste("data/",params$file_name,sep = "")),stringsAsFactors = FALSE)
+
+#raw<-read.csv("C:/Users/kareynol/OneDrive - New York State Office of Information Technology Services/Desktop/raw/Copy of USGS_540_13_MacroTaxaOutput.csv") #for scott george
+
+#12/6/2022 merge all the new files to get the table correct
+# raw2<-read.csv(here::here("data/MacroData_2021_kar.csv"))
+# raw3<-read.csv(here::here("data/Esopus_MacroData_2021.csv"))
+# raw3$X._Grids<-""
+# raw_all<-rbind(raw,raw2,raw3)
+#raw<-raw_all
+
+#raw<-read.csv("L:/DOW/BWAM Share/data/lab_data/WAA/2022/Copy of MacroData_2022_lake_corrections.csv")
+
+raw<-read.csv(here::here("data/internal_pats_2019_2020.csv"))
+
+
+if(params$file_type=="internal"){m_data_prep(raw)}
+
+if(params$file_type=="waa"){waa_data_prep(raw)
+ prepped_df<-prepped_df3 #renames and copies the df that was made 
+ }
+
+
+```
+
+## Run the species QA script to see if any are not matching the Master table.
+
+```{r}
+#check to see if there is a file called "newly_found_species.csv" in the outputsfolder. If there is, please rename it 
+site_check(prepped_df)
+
+species_check(prepped_df)
+
+#for 2022 data
+# prepped_df<-prepped_df %>%
+#   mutate(MSDH_GENSPECIES=case_when(
+#     MSDH_GENSPECIES == "neoleptophlebia_sp."~"undetermined_leptophlebiidae",
+#     TRUE~MSDH_GENSPECIES))
+
+```
+
+```{r}
+#prep for tables for Data Mod: this will do the macro species sample event table and the 
+df<-prepped_df
+tables<-df
+
+#tables$COLL_DATE<-as.Date(tables$COLL_DATE, "%m-%d-%Y")
+tables$COLL_DATE<-as.Date(tables$COLL_DATE, "%m/%d/%Y") 
+#create species event table
+tables$date<-format(tables$COLL_DATE,"%Y%m%d")
+tables<-tables %>% 
+  mutate(MSSIH_LINKED_ID_VALIDATOR=paste(site_id,date,COLLECT,Replicate,sep = "_")) %>% 
+  mutate(MSSIH_EVENT_SMAS_SAMPLE_DATE=format(COLL_DATE,"%m/%d/%Y")) %>% 
+  mutate(MSSIH_TOTAL_INDIV_CNT_NOTE="") %>% 
+  mutate(Taxonomist_name=paste("SBU")) %>% 
+  rename(MSSIH_TAXONOMIST=Taxonomist_name,
+         MSSIH_REPLICATE=Replicate,
+         MSSIH_EVENT_SMAS_HISTORY_ID=site_id,
+         BIOSAMPLE_COLLECT_METHOD_NUM=COLLECT
+         )
+
+
+#create sum of samples
+sum<-tables %>% 
+  select(MSSIH_LINKED_ID_VALIDATOR,INDIV) %>% 
+  group_by(MSSIH_LINKED_ID_VALIDATOR) %>% 
+  summarise(MSSIH_TOTAL_INDIV_CNT=sum(INDIV))
+
+#merge back
+tables<-merge(tables,sum, by="MSSIH_LINKED_ID_VALIDATOR")
+
+#merge wtih kick methods to get the validator
+
+kick_method<-readxl::read_excel(paste(here::here(),
+"/lkp/20201028_S_BIOSAMPLE_COLLECT_METHOD_all_fields.xlsx",sep = ""))
+
+kick<-kick_method %>% 
+  select(BIOSAMPLE_COLLECT_METHOD_NUM,BIOSAMPLE_COLLECT_METHOD)
+
+tables<-merge(tables,kick, by="BIOSAMPLE_COLLECT_METHOD_NUM")
+
+tables<-tables %>% 
+  mutate(MSSIH_EVENT_SMAS_HISTORY_ID = case_when(MSSIH_EVENT_SMAS_HISTORY_ID =="04-OATK-53"~"04-OATK-53.0",
+                             TRUE~MSSIH_EVENT_SMAS_HISTORY_ID))
+
+sample_new<-tables %>% 
+  select(MSSIH_EVENT_SMAS_HISTORY_ID,MSSIH_EVENT_SMAS_SAMPLE_DATE,
+         MSSIH_REPLICATE,MSSIH_TAXONOMIST,BIOSAMPLE_COLLECT_METHOD,
+         MSSIH_TOTAL_INDIV_CNT) %>% 
+  mutate(MSSIH_GROUP = "A") %>% 
+  rename(MSSIH_BIOSAMPLE_COLLECT_METHOD = BIOSAMPLE_COLLECT_METHOD) %>% 
+  distinct()
+
+#access the existing tables and create new versions with the date
+
+#read in the existing tables
+
+#sample event
+# sample.f<-read.csv(dir("L:/DOW/BWAM Share/data/streams/cleaned_files/Final_Macro_ITS/",full.names = T, pattern="*S_MACRO_SPECIES_SAMP_INF_HIST.csv"),stringsAsFactors = FALSE)
+
+#append
+
+#first get the date for the new file
+time=Sys.Date()
+time.t=format(time,"%Y%m%d")
+
+samp_event<-sample_new %>% 
+  mutate(MSSIH_EVENT_SMAS_SAMPLE_DATE=format(
+    as.Date(MSSIH_EVENT_SMAS_SAMPLE_DATE,"%m/%d/%Y"),
+    "%m/%d/%Y")) %>% 
+  mutate(MSSIH_TOTAL_INDIV_CNT=round(MSSIH_TOTAL_INDIV_CNT,digits = 0))
+
+
+#first sample event
+sample.new<-rbind(sample.f,samp_event,all=TRUE)
+
+sample.new [is.na(sample.new)] <- ""
+
+sample.new<-sample.new %>% #remove the TRUE row, not sure why this is created
+  filter(MSSIH_EVENT_SMAS_HISTORY_ID != "TRUE")
+
+#check to see that it didnt f-anything up
+ check<- setdiff(sample.new,sample.f)
+
+# write.csv(sample.new,paste("L:/DOW/BWAM Share/data/streams/cleaned_files/Final_Macro_ITS/",
+#                                 time.t,"_S_MACRO_SPECIES_SAMP_INF_HIST.csv",sep = ""),row.names = FALSE)
+
+# species_history<-species_history %>% 
+#   dplyr::rename(MSDH_INDIVIDUAL_SPECIES_CNT=MSSIH_TOTAL_INDIV_CNT)#this is where it went wrong
+
+
+
+
+```
+
+```{r}
+
+#species history
+# species.f<-read.csv(dir("L:/DOW/BWAM Share/data/streams/cleaned_files/Final_Macro_ITS/",full.names = T, pattern="*S_MACRO_SPECIES_DATA_HISTORY.csv"),stringsAsFactors = FALSE)
+
+species_new<-tables %>% 
+  select(MSSIH_LINKED_ID_VALIDATOR,INDIV,
+         MACRO_GENSPECIES,MSSIH_EVENT_SMAS_HISTORY_ID,
+         MSSIH_EVENT_SMAS_SAMPLE_DATE,MSSIH_REPLICATE,
+         BIOSAMPLE_COLLECT_METHOD) %>% 
+  mutate(MSSIH_GROUP = "A") %>% 
+  rename(MSDH_INDIVIDUAL_SPECIES_CNT=INDIV,
+         MSTR_MACRO_SPECIES_ID = MACRO_GENSPECIES,
+         MSDH_LINKED_ID_VALIDATOR=MSSIH_LINKED_ID_VALIDATOR)
+
+#fix_species
+species_new<-species_new %>% 
+  mutate(MSTR_MACRO_SPECIES_ID = tolower(MSTR_MACRO_SPECIES_ID)) %>% 
+  mutate(MSTR_MACRO_SPECIES_ID = stringr::str_replace(MSTR_MACRO_SPECIES_ID," ","_"))%>%
+  mutate(MSTR_MACRO_SPECIES_ID = stringr::str_replace(MSTR_MACRO_SPECIES_ID," ","_")) %>% 
+  mutate(MSTR_MACRO_SPECIES_ID = stringr::str_replace(MSTR_MACRO_SPECIES_ID," ","_"))
+
+#check that it matches
+master<-read.csv("L:/DOW/BWAM Share/data/streams/cleaned_files/Final_Macro_ITS/20210617_S_MSTR_MACRO_SPECIES.csv")
+
+species_here<-species_new %>% 
+  select(MSTR_MACRO_SPECIES_ID) %>% 
+  distinct()
+master_sp<-master %>% 
+  select(MMS_MACRO_GENSPECIES) %>% 
+  mutate(MSTR_MACRO_SPECIES_ID = MMS_MACRO_GENSPECIES)
+
+species_here<-left_join(species_here,master_sp)
+
+species_new<-species_new %>% 
+  mutate(MSTR_MACRO_SPECIES_ID = case_when(
+    MSTR_MACRO_SPECIES_ID == "physidae"~"undetermined_physidae",
+    MSTR_MACRO_SPECIES_ID == "gammaridae"~"undetermined_gammaridae",
+    MSTR_MACRO_SPECIES_ID == "crangonyctidae"~"undetermined_crangonyctidae",
+    MSTR_MACRO_SPECIES_ID == "cambaridae"~"undetermined_cambaridae",
+    MSTR_MACRO_SPECIES_ID == "turbellaria"~"undetermined_turbellaria",
+    TRUE~MSTR_MACRO_SPECIES_ID
+  ))
+
+species_here<-species_new %>% 
+  select(MSTR_MACRO_SPECIES_ID) %>% 
+  distinct()
+
+species_here2<-left_join(species_here,master_sp)
+#looks good
+
+#fix dates and subset
+species_new$MSDH_INDIVIDUAL_SPECIES_CNT<-round(
+  species_new$MSDH_INDIVIDUAL_SPECIES_CNT,digits = 0
+)
+species_new<-species_new %>% 
+  rename(MSSIH_BIOSAMPLE_COLLECT_METHOD = BIOSAMPLE_COLLECT_METHOD)
+
+#then bind to the raw species
+species.combo<-rbind(species.f,species_new)
+
+species.combo [is.na(species.combo)] <- ""
+
+# write.csv(species.combo,paste("L:/DOW/BWAM Share/data/streams/cleaned_files/Final_Macro_ITS/",
+#                                 time.t,"_S_MACRO_SPECIES_DATA_HISTORY.csv",sep = ""),row.names = FALSE)
+
+
+```
+
+
+```{r}
+#fix oat site id
+prepped_df<-prepped_df %>% 
+  mutate(site_id = case_when(site_id =="04-OATK-53"~"04-OATK-53.0",
+                             TRUE~site_id))
+
+prepped_df<-prepped_df %>%   
+  mutate(MACRO_GENSPECIES = case_when(
+    MACRO_GENSPECIES == "physidae"~"undetermined_physidae",
+    MACRO_GENSPECIES == "gammaridae"~"undetermined_gammaridae",
+    MACRO_GENSPECIES == "crangonyctidae"~"undetermined_crangonyctidae",
+    MACRO_GENSPECIES == "cambaridae"~"undetermined_cambaridae",
+    MACRO_GENSPECIES == "turbellaria"~"undetermined_turbellaria",
+    TRUE~MACRO_GENSPECIES
+  ))
+
+#run BAP's data prep on the raw file
+bap.prepped<-BAP::data_prep(prepped_df)
+#2022 data fixes, references seemed odd
+
+bap.prepped$REFERENCE<-""
+
+bap.prepped<-bap.prepped %>% 
+  dplyr::distinct()
+
+#write.csv(bap.prepped,"outputs/bap_check_1_5_23.csv")
+
+
+#split by collecon method and run the appropriate BA, needs PMA model for some reason
+pma.model<-BAP::pma.model
+
+bap.final<-apply_bap(bap.prepped)
+
+```
+
+```{r}
+
+#create metric file with correct names
+metrics<-bap.final
+  
+  metrics$DATE<-as.Date(metrics$DATE,"%m/%d/%Y")
+  #metrics$DATE<-as.Date(metrics$DATE,"%m-%d-%Y")
+   
+  metrics<-metrics %>% #make the validation id
+    mutate(BASIN=stringr::str_pad(BASIN,2,side = c("left"),pad = "0")) %>% 
+    mutate(RIVMILE=paste(RIVMILE)) %>% 
+    mutate(site_id=paste(BASIN,LOCATION,RIVMILE,sep = "-")) %>% 
+    mutate(date=format(DATE,"%Y%m%d"))#format date for tehe linked validator
+  #fix site
+  
+  metrics<-metrics %>% 
+    mutate(site_id = case_when(site_id == "04-OATK-53"~"04-OATK-53.0",
+                               TRUE~site_id))
+  
+    #get collection method in here
+  collect<-tables%>% 
+    select(MSSIH_EVENT_SMAS_HISTORY_ID,BIOSAMPLE_COLLECT_METHOD) %>% 
+    distinct() %>% 
+    dplyr::rename(site_id=MSSIH_EVENT_SMAS_HISTORY_ID)
+  
+  
+  metrics<-merge(metrics,collect,by="site_id",
+                 all.x = TRUE) #merge to get the collection method in there
+  
+  
+  #rename columns and create validator ID
+  metrics<-metrics %>% 
+    mutate(REP=right(EVENT_ID,1),
+           GROUP = "A",
+      MMDH_LINKED_ID_VALIDATOR=paste(site_id,date,"1",
+                                     REP,sep="_")
+)
+  #need to make a vec for columns and name changes
+  col.vec<-read.csv(here::here("lkp","col_names.csv"),stringsAsFactors = FALSE)
+  
+  col.from<-colnames(metrics)
+  
+  col.vec.short<- col.vec %>% 
+    subset(old %in% col.from)
+  
+  names(metrics)[match(col.vec.short[,"old"], names(metrics))] = col.vec.short[,"new"]
+   
+  for.table.vec<-unique(col.vec.short$new)
+  
+  metrics.subset <- metrics[, for.table.vec]
+  
+  metrics.subset<-metrics.subset %>% 
+    mutate_if(is.numeric, round, 3)
+
+  metrics.subset[is.na(metrics.subset)] <- ""  
+  
+  #grab some of the other columns back
+  metrics_cols<-tables %>% 
+    select(MSSIH_LINKED_ID_VALIDATOR,
+           MSSIH_EVENT_SMAS_HISTORY_ID,
+           MSSIH_EVENT_SMAS_SAMPLE_DATE,
+           BIOSAMPLE_COLLECT_METHOD_NUM,
+           BIOSAMPLE_COLLECT_METHOD,
+           MSSIH_REPLICATE) %>% 
+    mutate(MSSIH_GROUP = "A") %>% 
+    rename(MSSIH_BIOSAMPLE_COLLECT_METHOD_NUM = BIOSAMPLE_COLLECT_METHOD_NUM,
+           MSSIH_BIOSAMPLE_COLLECT_METHOD = BIOSAMPLE_COLLECT_METHOD,)
+  
+  metrics.subset<-metrics.subset %>% 
+    rename(MSSIH_LINKED_ID_VALIDATOR = MMDH_LINKED_ID_VALIDATOR)
+  
+  metrics_cols<-metrics_cols %>% 
+    distinct()
+  
+  metrics_table<-left_join(metrics.subset,metrics_cols,
+                       by = "MSSIH_LINKED_ID_VALIDATOR")
+    #write them to csv
+  time=Sys.Date()
+  time.t=format(time,"%Y%m%d")
+  
+  write.csv(metrics.subset,paste(here::here(),"/outputs/",
+                                  time.t,"_S_MACRO_METRICS_DATA_HISTORY.csv",sep = ""))
+
+  
+#fix Oak
+  metrics_table<-metrics_table %>% 
+    mutate(MSSIH_EVENT_SMAS_HISTORY_ID = case_when(MSSIH_LINKED_ID_VALIDATOR == "04-OATK-53.0_20210922_1_1"~"04-OATK-53.0",
+                                                   TRUE~MSSIH_EVENT_SMAS_HISTORY_ID),
+           MSSIH_EVENT_SMAS_SAMPLE_DATE = case_when(MSSIH_LINKED_ID_VALIDATOR == "04-OATK-53.0_20210922_1_1"~"09/22/2021",
+                                                    TRUE~MSSIH_EVENT_SMAS_SAMPLE_DATE),
+           MSSIH_BIOSAMPLE_COLLECT_METHOD_NUM = case_when(MSSIH_LINKED_ID_VALIDATOR == "04-OATK-53.0_20210922_1_1"~1,
+                                                    TRUE~MSSIH_BIOSAMPLE_COLLECT_METHOD_NUM),
+           MSSIH_BIOSAMPLE_COLLECT_METHOD = case_when(MSSIH_LINKED_ID_VALIDATOR == "04-OATK-53.0_20210922_1_1"~"Kick:Standard",
+                                                    TRUE~MSSIH_BIOSAMPLE_COLLECT_METHOD),
+           MSSIH_REPLICATE = case_when(MSSIH_LINKED_ID_VALIDATOR == "04-OATK-53.0_20210922_1_1"~1,
+                                                    TRUE~MSSIH_REPLICATE),
+           MSSIH_GROUP = "A")
+  
+#read in the existing one
+#metrics
+metrics.f<-read.csv(dir("L:/DOW/BWAM Share/data/streams/cleaned_files/Final_Macro_ITS/",full.names = T, pattern="*S_MACRO_METRICS_DATA_HISTORY.csv"),stringsAsFactors = FALSE)
+
+#then metrics
+metrics.new<-full_join(metrics.f,metrics_table) #need the full join since the metrics won't always have the same columms
+
+metrics.new [is.na(metrics.new)] <- ""
+metrics.new$MSSIH_LINKED_ID_VALIDATOR<-NULL
+
+write.csv(metrics.new,paste("L:/DOW/BWAM Share/data/streams/cleaned_files/Final_Macro_ITS/",
+                                time.t,"_S_MACRO_METRICS_DATA_HISTORY.csv",sep = ""),row.names = FALSE)
+
+
+
+
+```
+
+
+
+

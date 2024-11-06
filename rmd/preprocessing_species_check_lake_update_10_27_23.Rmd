@@ -1,0 +1,136 @@
+---
+title: "macroinvertebrate_processing_2024_in-house-processed"
+author: 'NYSDEC SMAS : Keleigh Reynolds'
+date: "2/3/2021"
+output: html_document
+params:
+  file_name: "C:/Users/kareynol/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/to_be_cleaned/2021_data/Copy of MacroData_2022.csv"
+  user: kareynol
+  file_type: "internal"
+---
+
+```{r include=FALSE,message=FALSE}
+library(dplyr)
+#runnign the missing patroons data and others from the 2020 file
+
+#file_type options : "waa" or "internal"
+
+#run the functions script
+source("rmd/functions.R")
+```
+
+```{r}
+#first read in the raw file
+#raw<-readxl::read_excel("C:/Users/kareynol/Desktop/R_SMAS/macro_processing_in_house/data/SampData_2018.xlsx")
+
+#raw<-read.csv(here::here(paste("data/",params$file_name,sep = "")),stringsAsFactors = FALSE)
+
+#raw<-read.csv("C:/Users/kareynol/OneDrive - New York State Office of Information Technology Services/Desktop/raw/Copy of USGS_540_13_MacroTaxaOutput.csv") #for scott george
+
+#12/6/2022 merge all the new files to get the table correct
+# raw2<-read.csv(here::here("data/MacroData_2021_kar.csv"))
+# raw3<-read.csv(here::here("data/Esopus_MacroData_2021.csv"))
+# raw3$X._Grids<-""
+# raw_all<-rbind(raw,raw2,raw3)
+#raw<-raw_all
+
+#raw<-read.csv("L:/DOW/BWAM Share/data/lab_data/WAA/2022/Copy of MacroData_2022_lake_corrections.csv")
+
+raw<-read.csv(here::here("data/internal_pats_2019_2020.csv"))
+
+
+if(params$file_type=="internal"){m_data_prep(raw)}
+
+if(params$file_type=="waa"){waa_data_prep(raw)
+ prepped_df<-prepped_df3 #renames and copies the df that was made 
+ }
+
+
+```
+
+## Run the species QA script to see if any are not matching the Master table.
+
+```{r}
+#check to see if there is a file called "newly_found_species.csv" in the outputsfolder. If there is, please rename it 
+site_check(prepped_df)
+
+species_check(prepped_df)
+
+#for 2022 data
+prepped_df<-prepped_df %>%
+  mutate(MSDH_GENSPECIES=case_when(
+    MSDH_GENSPECIES == "neoleptophlebia_sp."~"undetermined_leptophlebiidae",
+    TRUE~MSDH_GENSPECIES))
+
+```
+
+```{r}
+#prep for tables for Data Mod: this will do the macro species sample event table and the 
+#Sample info history tables, and save it to the outputs folder with today's date.
+
+if (params$file_type=="internal"){tables_1_2(prepped_df)}
+if (params$file_type=="waa"){tables_1_2.waa(prepped_df)}
+
+#access the existing tables and create new versions with the date
+
+#read in the existing tables
+
+#sample event
+sample.f<-read.csv(dir("L:/DOW/BWAM Share/data/streams/cleaned_files/Final_Macro_ITS/",full.names = T, pattern="*S_MACRO_SPECIES_SAMP_INF_HIST.csv"),stringsAsFactors = FALSE)
+
+
+#species history
+species.f<-read.csv(dir("L:/DOW/BWAM Share/data/streams/cleaned_files/Final_Macro_ITS/",full.names = T, pattern="*S_MACRO_SPECIES_DATA_HISTORY.csv"),stringsAsFactors = FALSE)
+
+#metrics
+metrics.f<-read.csv(dir("L:/DOW/BWAM Share/data/streams/cleaned_files/Final_Macro_ITS/",full.names = T, pattern="*S_MACRO_METRICS_DATA_HISTORY.csv"),stringsAsFactors = FALSE)
+
+#append each of them
+
+#first get the date for the new file
+time=Sys.Date()
+time.t=format(time,"%Y%m%d")
+
+samp_event<-samp_event %>% 
+  mutate(MSSIH_EVENT_SMAS_SAMPLE_DATE=format(
+    as.Date(MSSIH_EVENT_SMAS_SAMPLE_DATE,"%m-%d-%Y"),
+    "%m/%d/%Y")) %>% 
+  mutate(MSSIH_TOTAL_INDIV_CNT=round(MSSIH_TOTAL_INDIV_CNT,digits = 0))
+
+
+#first sample event
+sample.new<-rbind(sample.f,samp_event,all=TRUE)
+
+sample.new [is.na(sample.new)] <- ""
+
+write.csv(sample.new,paste("L:/DOW/BWAM Share/data/streams/cleaned_files/Final_Macro_ITS/",
+                                time.t,"_S_MACRO_SPECIES_SAMP_INF_HIST.csv",sep = ""),row.names = FALSE)
+
+# species_history<-species_history %>% 
+#   dplyr::rename(MSDH_INDIVIDUAL_SPECIES_CNT=MSSIH_TOTAL_INDIV_CNT)#this is where it went wrong
+
+#fix dates and subset
+
+
+species_history$MSDH_INDIVIDUAL_SPECIES_CNT<-round(
+  species_history$MSDH_INDIVIDUAL_SPECIES_CNT,digits = 0
+)
+
+species.f$MSDH_INDIVIDUAL_SPECIES_CNT<-round(
+  species.f$MSDH_INDIVIDUAL_SPECIES_CNT,digits = 0
+)
+#then the raw species
+species.new<-rbind(species.f,species_history)
+
+species.new [is.na(species.new)] <- ""
+
+write.csv(species.new,paste("L:/DOW/BWAM Share/data/streams/cleaned_files/Final_Macro_ITS/",
+                                time.t,"_S_MACRO_SPECIES_DATA_HISTORY.csv",sep = ""),row.names = FALSE)
+
+
+
+
+
+```
+
+
