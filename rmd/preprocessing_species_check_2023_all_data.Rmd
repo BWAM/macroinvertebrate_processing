@@ -10,22 +10,21 @@ params:
 ---
 
 ```{r include=FALSE,message=FALSE}
+library(skimr)
 library(arrow)
 library(dplyr)
 library(readr)
 
 #file_type options : "waa" or "internal"
 
-#run the functions script
+#run the functions script - this is a set of functions i wrote for prepping the macro data
 source("functions.R")
 
 ```
 
 ```{r}
-#first read in the raw files for 2023
-raw<-read.csv(params$file_name)
 
-#11/5/2024 reading in everything in the L drive for 2023 and 2024
+#11/5/2024 reading in everything in the L drive for 2023 and 2024 - which is just DEER river for 2024 and we are still missing 2023 lake data of of 12/4/024
 list<-list.files("L:/DOW/BWAM Share/data/lab_data/WAA/2023/raw/",
                  pattern = "*.csv",
                  full.names = TRUE)
@@ -36,40 +35,30 @@ raw.file<-lapply(list,
 raw<-bind_rows(raw.file,
                .id = "column_label")
 
+raw<-raw %>% 
+  mutate(MSSIH_EVENT_SMAS_HISTORY_ID = case_match(
+    MSSIH_EVENT_SMAS_HISTORY_ID,
+    "Archer Creek"~"11-ARCH-1.9", #archer creek is also missing the method, fixing now for a standard kick - i know this bc it's RMN, which is a 300 count but a kick
+    .default = MSSIH_EVENT_SMAS_HISTORY_ID
+  )) %>% 
+  mutate(MSSIH_BIOSAMPLE_COLLECT_METHOD = case_when(
+    Client_Project_Name %in% "RMN"~"Kick: Standard",
+    TRUE ~MSSIH_BIOSAMPLE_COLLECT_METHOD))
+
 if(params$file_type=="internal"){m_data_prep(raw)}
 
 if(params$file_type=="waa"){waa_data_prep(raw)
  prepped_df<-prepped_df3 #renames and copies the df that was made 
 }
 
+
 #11/4/24 check to see why there are less records - Archer creek is teh missing records - these are not ours
 sites.raw<-unique(raw$MSSIH_EVENT_SMAS_HISTORY_ID)
 sites.merged<-unique(prepped_df3$MSSIH_EVENT_SMAS_HISTORY_ID)
 
-setdiff(sites.raw,sites.merged) # Yes confirmed it is Archer Creek
+setdiff(sites.raw,sites.merged) # Yes confirmed it is Archer Creek, which was renamed WAA provides us this data and i'm not sure why; fixed on line37
 
-```
 
-## Run the species QA script to see if any are not matching the Master table.
-
-```{r}
-#check to see if there is a file called "newly_found_species.csv" in the outputsfolder. If there is, please rename it 
-site_check(prepped_df)
-
-species_check(prepped_df)
-
-#for 2022 data
-# prepped_df<-prepped_df %>%
-#   mutate(MSDH_GENSPECIES=case_when(
-#     MSDH_GENSPECIES == "neoleptophlebia_sp."~"undetermined_leptophlebiidae",
-#     TRUE~MSDH_GENSPECIES))
-# 
-# #for 2022 lakes data - 10/24/2023
-# 
-# prepped_df<-prepped_df3 %>% 
-#   #subset(site_id != "HWF") %>% 
-#   subset(site_id == "04-LHONYE-1.0") %>% 
-#   subset(site_id == "04-LHONYE-0.0")
 
 ```
 
@@ -106,7 +95,8 @@ metrics_final<-metric_table(bap.final)
 sites.event<-unique(samp_event$MSSIH_EVENT_SMAS_HISTORY_ID)
 sites.metrics<-unique(metrics.subset$site_id)
 
-setdiff(sites.event,sites.metrics) #these are all low gradient besides the lake 04-LHONYE-0.0
+setdiff(sites.event,sites.metrics) #these are all low gradient besides the lake 04-LHONYE-0.0, so will not be in the metrics file anyway
+# "04-LHONYE-0.0" "10-DUTT-0.6"   "10-RILE-0.5"   "10-WOOD-3.8"   "12-NMIL-0.5"   "17-WILT-0.7"  these are the guys
 ```
 Prep for WQMA
 
@@ -124,16 +114,18 @@ event_deer$MSSIH_GROUP<-""
 
 #bind them
 final_event<-rbind(event_2023,event_deer) #good they match
-final_event$X<-NULL
+final_event$X<-NULL #remove weird column
 
 #write to folder and move the archive that was the originals to another folder (archive)
 #write.csv(final_event,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_sample_inf.csv")
+#i saved these to file just in cae
+
 
 #read in th two metric files
 metrics_2023<-read.csv("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/METRICS_2023_processed_11_5_24_KAR.csv")
 metrics_deer<-read.csv("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/20241007_METRICS_deer_river.csv")
 
-#bind them, these have differing columns bc of hte metric differences
+#bind them, these have differing columns bc of hte metric differences; but the amount is fine - 377 of 2023 plus 6 from deer river for 383 total - which is less than the event table since some of them CANT have metrics calculated yet.
 final_metrics<-dplyr::full_join(metrics_2023,metrics_deer)
 
 #join a couple fields to the metrics file 
@@ -144,28 +136,214 @@ cols<-final_event %>%
          MSSIH_EVENT_SMAS_SAMPLE_DATE,
          MSSIH_REPLICATE,
          MSSIH_GROUP,
-         MSSIH_LINKED_ID_VALIDATOR)
+         MSSIH_LINKED_ID_VALIDATOR) #403 in the original event table, this accounts for the low gradient and the one lake one for 2023 data
+
+setdiff(final_event$MSSIH_EVENT_SMAS_HISTORY_ID,final_metrics$site_id)#403 in the original event table, this accounts for the low gradient and the one lake one for 2023 data
+# "04-LHONYE-0.0" "10-DUTT-0.6"   "10-RILE-0.5"   "10-WOOD-3.8"   "12-NMIL-0.5"   "17-WILT-0.7"  these are the guys
 #rename missing column for join
 final_metrics$MSSIH_LINKED_ID_VALIDATOR<-final_metrics$MMDH_LINKED_ID_VALIDATOR
 
 final_metrics_2<-left_join(final_metrics,cols,
                            by = "MSSIH_LINKED_ID_VALIDATOR")
+if (nrow(final_metrics_2) != nrow(cols)) {stop("Number of rows don't match, check the matching - it could be low gradient samples or lakes with no metrics")}
+#it didnt this is because of the low gradient as noted above
+
 final_metrics_2$EVENT_ID<-NULL #remove the event id as it's not in the right format - it's the output from the BAP package
 
 #write to folder and move the archive that was the originals to another folder (archive)
 #write.csv(final_metrics_2,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_metrics.csv")
+```
 
+Site corrections from the look-up file from Charlie
+
+```{r site-id-corrections}
+sites_survey_24<-readxl::read_excel("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/siteIdCrosswalkTable_v2.xlsx")
+#this is just for 2024
+
+sites_24<-sites_survey_24 %>% 
+    select(finalSiteID,revisedOriginalSiteID, eventSMASId_2,eventSMASSampleDate) %>% 
+  rename(finalSiteCode = finalSiteID,
+         UnadjustedOriginalSiteCode = revisedOriginalSiteID,
+         EVENT_ID = eventSMASId_2,
+         DATE = eventSMASSampleDate) %>% 
+  mutate(DATE = as.Date(DATE,"%m/%d/%Y")) %>% 
+  distinct()
+
+
+#read in the 2023 ones
+sites_survey_23<-readxl::read_excel("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/draft_2023_crosswalk_table_v1_2024-12-04.xlsx")
+
+
+sites_23<-sites_survey_23 %>% 
+  select(finalSiteCode,UnadjustedOriginalSiteCode, SEIH_EVENT_SMAS_SAMPLE_DATE,SEIH_SMAS_ARRIVETIME) %>% 
+  mutate(date = format(as.Date(SEIH_EVENT_SMAS_SAMPLE_DATE, "%m/%d/%y"), "%Y%m%d"),
+         time = paste(SEIH_SMAS_ARRIVETIME),
+         time = stringr::str_replace(time,":",""))%>% 
+  mutate(EVENT_ID = paste(finalSiteCode,date,sep = "_"),
+         EVENT_ID = paste(EVENT_ID,time,sep = "T"))
+
+
+sites_23<-sites_23 %>% 
+  select(UnadjustedOriginalSiteCode,finalSiteCode,EVENT_ID, SEIH_EVENT_SMAS_SAMPLE_DATE) %>% 
+  distinct() %>% 
+  rename(DATE = SEIH_EVENT_SMAS_SAMPLE_DATE) %>% 
+  mutate(DATE = as.Date(DATE, "%m/%d/%y"))
+
+#combine 23 and 24
+sites_23_24<-rbind(sites_23,
+                   sites_24) %>% 
+  rename(site_id = UnadjustedOriginalSiteCode)# number of rows match here for the rbind
+
+
+#ok now we'll bind to the final_metrics_2 df before we adjust for WQMA compatability
+
+final_metrics_2$DATE<-as.Date(final_metrics_2$DATE,"%Y-%m-%d")
+
+final_metrics_3<-left_join(
+  final_metrics_2,
+  sites_23_24,
+  by = c("site_id","DATE")
+)
+
+#let's look at the ones that didnt join
+missing_events<-final_metrics_3 %>% 
+  subset(is.na(finalSiteCode))
+
+
+#site adjustments based on the join - there will likely be some here that do not exist and need to be created? Re run lines 197-205 after corrections are made
+
+final_metrics_4<-final_metrics_3 %>% #first correct dates that don't match the surveys
+  mutate(site_id = case_when(site_id %in% '11-LHUD-117.1'~'13-LHUD-117.1',
+                             TRUE ~ site_id),
+         new_DATE =
+           case_when(site_id %in% '10-BOQT-28.6' & DATE == "2023-07-27"~"2023-07-26",
+                     site_id %in% "10-GRAV-5.7" & DATE %in% "2023-07-27"~"2023-07-25",
+                     site_id %in% '10-LSAB-17.6' & DATE %in% "2023-07-26"~"2023-07-25",
+                     site_id %in% '10-LSAB-5.7' & DATE %in% "2023-07-26"~"2023-07-25",
+                     #site_id %in% '10-SABL_W-32.1' & DATE %in% "2023-07-20"~"2023-07-26",
+                     site_id %in% '10-SARA-21.8' & DATE %in% "2023-07-26"~"2023-07-25",
+                     site_id %in% '11-UHUD-2.0' & DATE %in% "2023-09-01"~"2023-09-13",
+                     site_id %in% '12-MOHK-65.8' & DATE %in% "2023-09-01"~"2023-09-12",
+                     site_id %in% '12-MOHK-65.8' & DATE %in% "2023-09-14"~"2023-09-12",
+                     site_id %in% '13-LHUD-117.1' & DATE %in% "2023-09-17"~"2023-09-11",
+                     TRUE ~ paste(DATE)
+
+           )) %>%
+  mutate(DATE = as.Date(new_DATE,"%Y-%m-%d"))
+
+
+#check for missing sites again - first remove the old joined columns since they will re-join and mess it up
+final_metrics_4<-final_metrics_4 %>% 
+  select(-c(finalSiteCode,EVENT_ID))
+
+final_metrics_4<-left_join(
+  final_metrics_4,
+  sites_23_24,
+  by = c("site_id","DATE")
+)
+
+#let's look at the ones that didnt join
+missing_events<-final_metrics_4 %>% 
+  subset(is.na(finalSiteCode))
+
+#make notes for these
+missing_events<-missing_events %>% 
+  mutate(notes = "",
+         missing_survey = "",
+         missing_site = "") %>% 
+  mutate(missing_site = case_when(
+    site_id %in% "10-CADE-6.2"~"T",
+    site_id %in% "10-SABL_W-25.6" ~"F",
+    site_id %in% "10-SMOW-0.1" ~"T", 
+    site_id %in% "11-ARCH-1.9" ~"F", 
+    site_id %in% "11-BORE-13.6" ~"T", 
+    site_id %in% "11-BORE-19.4" ~"T",
+    site_id %in% "11-GULF-0.7" ~"T",
+    site_id %in% "11-JONS-2.1" ~"T",
+    site_id %in% "11-WPBR-0.6" ~"T",
+    site_id %in% "12-SIMB-0.5" ~"T",
+    site_id %in% "13-LHUD-117.1" ~"T",
+    TRUE~"F")) %>% 
+  mutate(missing_survey = case_when(
+      site_id %in% "10-CADE-6.2"~"T",
+    site_id %in% "10-SABL_W-25.6" ~"T",
+    site_id %in% "10-SMOW-0.1" ~"T", 
+    site_id %in% "11-ARCH-1.9" ~"T", 
+    site_id %in% "11-BORE-13.6" ~"T", 
+    site_id %in% "11-BORE-19.4" ~"T",
+    site_id %in% "11-GULF-0.7" ~"T",
+    site_id %in% "11-JONS-2.1" ~"T",
+    site_id %in% "11-WPBR-0.6" ~"T",
+    site_id %in% "12-SIMB-0.5" ~"T",
+    TRUE~"F"
+  )) %>% 
+    mutate(notes = case_when(
+    site_id %in% "10-CADE-6.2"~"Not in site selection template either",
+    site_id %in% "10-SABL_W-25.6" ~"There are 3 potential matches in the survey, 7/26/23 matched fine, but there is another date 7/20 with 2 replicates??",
+    site_id %in% "10-SMOW-0.1" ~"This one is not in teh sites table or the 23 site selection, maybe Tom? ", 
+    site_id %in% "11-ARCH-1.9" ~"Create event id", 
+    site_id %in% "11-BORE-13.6" ~"Not in sites table or 23 site selection", 
+    site_id %in% "11-BORE-19.4" ~"Not in sites table or 23 site selection",
+    site_id %in% "11-GULF-0.7" ~"Not in sites table or 23 site selection",
+    site_id %in% "11-JONS-2.1" ~"Not in sites table or 23 site selection",
+    site_id %in% "11-WPBR-0.6" ~"Not in sites table or 23 site selection",
+    site_id %in% "12-SIMB-0.5" ~"Not in sites table or 23 site selection",
+    TRUE~"F"))
+
+#checked - these do not exist in the existing survey checks OR the 2023 that are in the database
+#write to .csv for checking, then hashed out to keep from overwriting when checking
+#write.csv(missing_events,here::here("outputs/bap_missing_sites_surveys_12_5_24.csv"))
+
+#create the one event ID that I can - the one that has a site that exists already -11-ARCH-1.9
+
+final_metrics_4<-final_metrics_4 %>% 
+  mutate(EVENT_ID = case_when(
+    site_id %in% "11-ARCH-1.9"~"11-ARCH-1.9_20230918T1200",
+    TRUE ~ EVENT_ID
+  ))
+
+#subset to the complete ones for creating the .RDS files
+final_metrics_5<-final_metrics_4 %>% 
+  filter(!is.na(EVENT_ID)) 
+
+#clean it up
+final_metrics_5<-final_metrics_5 %>% 
+  mutate(MSSIH_EVENT_SMAS_HISTORY_ID = finalSiteCode,
+         MSSIH_EVENT_SMAS_SAMPLE_DATE = DATE) %>% #make all the columns agree
+  select(-c(new_DATE,date))
+
+#write to file
+# write.csv(final_metrics_5,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_metrics_cleaned_preWQMAval.csv")
+
+#create new sample file as well
+
+sample_final<-final_metrics_5 %>% 
+  select(c(starts_with("MSSIH_"),EVENT_ID))
+
+#need the counts-so we'll get those from the originally created sample table
+samp_small<-final_event %>% 
+  select(c(MSSIH_LINKED_ID_VALIDATOR, #we cna use the originally created linked validator to join
+           MSSIH_TAXONOMIST,
+           MSSIH_TOTAL_INDIV_CNT,
+           MSSIH_TOTAL_INDIV_CNT_NOTE))
+  
+sample_final_2<-left_join(sample_final,samp_small,
+                          by = "MSSIH_LINKED_ID_VALIDATOR") #total rows match the original
+#create check
+if (nrow(sample_final_2) != nrow(final_metrics_5)) {stop("Number of rows don't match, check the matching")}
+
+#save to file
+# write.csv(sample_final_2,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_sample_inf_cleaned_preWQMAval.csv")
 
 ```
+
 Convert data to new format using Zach's code
 https://github.com/BWAM/data_warehouse_prep/blob/main/R/s_macro_metrics.R
 
 
-Prep the macro sample file for the WQMA database; for now we can create a dummy s_event file since we do not have it yet (as of 11/6/24)
-However, for 2023 it appears they are in the the DB already - so i will grab it
+Prep the macro sample file for the WQMA database; for now we can create a dummy s_event file since we do not have it yet (as of 12/5/24)
 
 ```{r grab-event-table}
-
 
 #check to see if the sites are already in there
 obt_result_dir <- file.path(
@@ -187,33 +365,14 @@ stream_df <- open_dataset(obt_result_dir) |>
 
 streams_sites<-unique(stream_df$SITE_CODE)
 
-setdiff(sites.metrics,streams_sites)
-
-#these may be adjusted when we get the new site ID's from teh survey information
-
-#unique sites/dates
-stream_df_datetime <- open_dataset(obt_result_dir) |> 
-  filter(WATERBODY_TYPE %in% "river_stream") |>
-  distinct(WATERBODY_TYPE, SITE_CODE,EVENT_ID,EVENT_DATETIME) |>
-  collect()
-
-
-s_event_2023<-stream_df_datetime %>% 
-  mutate(event_id = EVENT_ID,
-         year = lubridate::year(EVENT_DATETIME)) %>% 
-  filter(year >= 2023)
-
-#looks like deer river will not match - these are not in the db yet
-
-
+missing_sites<-setdiff(sites.metrics,streams_sites)
+#i think now this part is unecessary since i matched using the surveys above. The surveys will be what Charlie is using to create new sites so that should be all of them. I subsetted the missing events (surveys) into an output folder that we'll work through.
 
 ```
 
 This is more functions from the WQMA workup from Zach, i'll leave them in for now, and we can update as needed
 
 ```{r}
-
-
 correct_site_name <- function(df, vars) {
   final_df <- df |>
     dplyr::mutate(
@@ -431,6 +590,8 @@ macro_event_corrections <- function(df) {
 ```
 
 
+Read in my prepped files and adjust the sample table with Zach's code
+
 ```{r}
 
 
@@ -447,15 +608,16 @@ standard_read_csv <- function(file, col_types = NULL) {
 import_s_macro_sample <- function(data_dir) {
   standard_read_csv(
     file = file.path(data_dir,
-                     "2023_all_2024_deer_river_sample_inf.csv"),
+                     "2023_all_2024_deer_river_sample_inf_cleaned_preWQMAval.csv"),
     col_types = cols(
       MSSIH_EVENT_SMAS_HISTORY_ID = col_character(),
-      MSSIH_EVENT_SMAS_SAMPLE_DATE = col_date(format = "%m-%d-%Y"), #updated the date format here
+      MSSIH_EVENT_SMAS_SAMPLE_DATE = col_date(format = "%Y-%m-%d"), #updated the date format here
       MSSIH_REPLICATE = col_character(),
       MSSIH_TAXONOMIST = col_character(),
       MSSIH_BIOSAMPLE_COLLECT_METHOD = col_character(),
       MSSIH_TOTAL_INDIV_CNT = col_double(),
-      MSSIH_GROUP = col_character()
+      MSSIH_GROUP = col_character(),
+      EVENT_ID = col_character() #KAR addition since i made these already and we dont have time on the macros
     )
   )
 }
@@ -469,11 +631,10 @@ prep_s_macro_sample <- function(x, s_event) {
       taxonomist = MSSIH_TAXONOMIST,
       collection_method = MSSIH_BIOSAMPLE_COLLECT_METHOD,
       total_individual_count = MSSIH_TOTAL_INDIV_CNT,
-      sample_group = MSSIH_GROUP
+      sample_group = MSSIH_GROUP,
+      event_id = EVENT_ID
     ) |> 
-    mutate(sample_date = format(sample_date, "%Y%m%d"),
-           #kar addition)
-           event_id = paste(site_id,sample_date,sep = "_"))|> 
+    mutate(sample_date = format(sample_date, "%Y%m%d"))|> 
     mutate(sample_group = case_when(
       grepl("[a-zA-Z]", replicate) ~ glue::glue("{sample_group}_{replicate}"),
       .default = sample_group
@@ -505,14 +666,14 @@ prepped_sample_table<-prep_s_macro_sample(imported_sample,s_event = s_event_2023
 ```
 
 
-Then prep the metrics file
+Then prep the metrics file using Zach's code
 
 ```{r}
 
 import_s_macro_metrics <- function(data_dir) {
   standard_read_csv(
     file = file.path(data_dir,
-                     "2023_all_2024_deer_river_metrics.csv"),
+                     "2023_all_2024_deer_river_metrics_cleaned_preWQMAval.csv"),
            col_types = cols(
              MMDH_RICHNESS = col_double(),
              MMDH_RICHNESS_SCORE = col_double(),
@@ -534,9 +695,10 @@ import_s_macro_metrics <- function(data_dir) {
              MSSIH_BIOSAMPLE_COLLECT_METHOD = col_character(),
              MSSIH_BIOSAMPLE_COLLECT_METHOD_NUM = col_double(),
              MSSIH_EVENT_SMAS_HISTORY_ID = col_character(),
-             MSSIH_EVENT_SMAS_SAMPLE_DATE = col_date(format = "%m-%d-%Y"), #updated from "%m/%d/%Y" by KAR
+             MSSIH_EVENT_SMAS_SAMPLE_DATE = col_date(format = "%Y-%m-%d"), #updated by KAR
              MSSIH_REPLICATE = col_double(),
-             MSSIH_GROUP = col_character()
+             MSSIH_GROUP = col_character(),
+             EVENT_ID = col_character()
            ))
 }
 
@@ -564,15 +726,16 @@ prep_s_macro_metrics <- function(x, s_event, s_macro_sample) {
       score_nutrient_biotic_index_phosphorus = MMDH_NBI_P_SCORE,
       raw_non_chiro_oligo_richness = MMDH_NCO_RICH,
       score_non_chiro_oligo_richness = MMDH_NCO_RICH_SCORE,
+      event_id = EVENT_ID
      # raw_percent_dominance_3 = MMDH_PCT_DOMINANCE_3,
-      #score_percent_dominance_3 = MMDH_PCT_DOMINANCE_3_SCORE
+      #score_percent_dominance_3 = MMDH_PCT_DOMINANCE_3_SCORE # dont have these in the file so i have to hash them out - these are sandy i think?
     ) |> 
     mutate(date = format(date, "%Y%m%d")) |> 
-    tidyr::unite(
-      "event_id",
-      site_id,
-      date
-    ) |> 
+    # tidyr::unite(
+    #   "event_id",
+    #   site_id,
+    #   date
+    # ) |> #kar hashed out since i created these already
     mutate(
       collection_method = case_match(
         collection_method,
@@ -652,14 +815,65 @@ assign_s_biosurvey_parameter_description  <- function(x) {
 imported_metrics<-import_s_macro_metrics(data_dir)
 prepped_metrics<-prep_s_macro_metrics(imported_metrics, s_event_2023, prepped_sample_table)
 
+#fix the 2 site_id columns by removing one of them
+prepped_metrics<-prepped_metrics %>% 
+  select(-c(site_id.y)) %>% 
+  rename(site_id = site_id.x)
+
+
+
 ```
+
+```{r final-checks}
+#check to make sure that there are matches
+
+setdiff(prepped_metrics$event_id,prepped_sample_table$event_id)
+setdiff(prepped_sample_table$event_id, prepped_metrics$event_id)
+#these are good
+
+prepped_metrics %>% skim()
+prepped_sample_table %>% skim()
+
+#fix Archer creek AGAIN
+prepped_sample_table<-prepped_sample_table %>% 
+  mutate(site_id = case_when(event_id %in% "11-ARCH-1.9_20230918T1200" ~ "11-ARCH-1.9",
+                             TRUE~site_id))
+
+```
+
 
 Write these to the staging area
 
 ```{r}
 
-write.csv(prepped_metrics,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/s_macro_metrics_2023_needs_time_on_event_id_11_6_24.csv")
-write.csv(prepped_sample_table,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/s_macro_sample_2023_needs_time_on_event_id_11_6_24.csv")
+
+saveRDS(
+  object = prepped_metrics,
+  file = file.path(
+    "L:",
+    "DOW",
+    "BWAM Share",
+    "data",
+    "data_warehouse_staging",
+    "2024_V3",
+    "raw_data",
+    "bap_metrics.rds"
+  )
+)
+
+saveRDS(
+  object = prepped_sample_table,
+  file = file.path(
+    "L:",
+    "DOW",
+    "BWAM Share",
+    "data",
+    "data_warehouse_staging",
+    "2024_V3",
+    "raw_data",
+    "bap_sample_table.rds"
+  )
+)
 
 ```
 
