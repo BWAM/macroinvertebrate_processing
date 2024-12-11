@@ -25,6 +25,7 @@ source("functions.R")
 ```{r}
 
 #11/5/2024 reading in everything in the L drive for 2023 and 2024 - which is just DEER river for 2024 and we are still missing 2023 lake data of of 12/4/024
+#so this skips the parameter above for the file, but that's ok. 
 list<-list.files("L:/DOW/BWAM Share/data/lab_data/WAA/2023/raw/",
                  pattern = "*.csv",
                  full.names = TRUE)
@@ -38,7 +39,7 @@ raw<-bind_rows(raw.file,
 raw<-raw %>% 
   mutate(MSSIH_EVENT_SMAS_HISTORY_ID = case_match(
     MSSIH_EVENT_SMAS_HISTORY_ID,
-    "Archer Creek"~"11-ARCH-1.9", #archer creek is also missing the method, fixing now for a standard kick - i know this bc it's RMN, which is a 300 count but a kick
+    "Archer Creek"~"11-ARCH-1.9", #archer creek is also missing the method, fixing now for a standard kick - this one is not actually RMN - maybe we should rename the project.
     .default = MSSIH_EVENT_SMAS_HISTORY_ID
   )) %>% 
   mutate(MSSIH_BIOSAMPLE_COLLECT_METHOD = case_when(
@@ -47,7 +48,7 @@ raw<-raw %>%
 
 if(params$file_type=="internal"){m_data_prep(raw)}
 
-if(params$file_type=="waa"){waa_data_prep(raw)
+if(params$file_type=="waa"){waa_data_prep(raw) #this funtion cleans up the file and gets it ready to be injested into the BAP script
  prepped_df<-prepped_df3 #renames and copies the df that was made 
 }
 
@@ -56,7 +57,7 @@ if(params$file_type=="waa"){waa_data_prep(raw)
 sites.raw<-unique(raw$MSSIH_EVENT_SMAS_HISTORY_ID)
 sites.merged<-unique(prepped_df3$MSSIH_EVENT_SMAS_HISTORY_ID)
 
-setdiff(sites.raw,sites.merged) # Yes confirmed it is Archer Creek, which was renamed WAA provides us this data and i'm not sure why; fixed on line37
+setdiff(sites.raw,sites.merged) # Yes confirmed it is Archer Creek, which was renamed WAA provides us this data and i'm not sure why; fixed no remaining differences
 
 
 
@@ -64,10 +65,10 @@ setdiff(sites.raw,sites.merged) # Yes confirmed it is Archer Creek, which was re
 
 ```{r}
 #prep for tables for Data Mod: this will do the macro species sample event table and the 
-#Sample info history tables, and save it to the outputs folder with today's date.
+#Sample info history tables, and save it to the outputs folder with today's date. Hashed out for this review
 
-if (params$file_type=="internal"){tables_1_2(prepped_df)}
-if (params$file_type=="waa"){tables_1_2.waa(prepped_df)}
+#if (params$file_type=="internal"){tables_1_2(prepped_df)}
+#if (params$file_type=="waa"){tables_1_2.waa(prepped_df)}
 
 ```
 
@@ -81,8 +82,6 @@ bap.prepped<-BAP::data_prep(prepped_df)
 bap.prepped$REFERENCE<-""
 bap.prepped<-bap.prepped %>% 
   distinct()
-
-
 
 #split by collection method and run the appropriate BA
 bap.final<-apply_bap(bap.prepped)
@@ -102,7 +101,7 @@ Prep for WQMA
 
 ```{r WQMA-data-integration}
 
-#write these to the L drive
+#write these to the L drive, hashed out to not overwrite
 #write.csv(metrics.subset, "L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/METRICS_2023_processed_11_5_24_KAR.csv" )
 #write.csv(samp_event,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/MACRO_SAMP_INF_2023_processed_11_5_24_KAR.csv")
 
@@ -842,13 +841,101 @@ prepped_sample_table<-prepped_sample_table %>%
 ```
 
 
+```{r data-checks}
+#checking data types
+data(columns_dictionary, package = "nexus")
+
+str(prepped_metrics)
+
+
+
+#NA checks
+
+# Option 1 (Recommended)
+option1 <- df |> 
+  replace_na(
+    list(
+      b = "missing",
+      c = "not-applicable"
+    )
+  )
+
+
+
+
+```
+
+```{r update-flags-and-description}
+
+#check metrics fall within specified range
+check<-prepped_metrics %>% 
+  filter(parameter_name %in% "bioassessment_profile")
+range(check$result_value)  #looks good, should be between 1-10
+
+prepped_metrics2<-prepped_metrics %>% 
+  mutate(result_category = case_when(
+    parameter_name %in% "bioassessment_profile" & result_value < 2.5 ~ "severly_impacted",
+    parameter_name %in% "bioassessment_profile" & between(result_value, 2.5,5.0) ~ "moderately_impacted", 
+    parameter_name %in% "bioassessment_profile" & between(result_value, 5.0,7.5) ~ "slightly_impacted", 
+    parameter_name %in% "bioassessment_profile" & result_value > 7.5 ~ "non_impacted", 
+    TRUE ~ ""
+  )) #use event id to determine the flags
+
+#flags for < total amount
+event_ids_tc<-prepped_metrics2 %>% 
+  filter(parameter_name %in% "total_individual_count") %>% 
+  mutate(result_qualifier = case_when(collection_method %in% 
+                                 (collection_method %in% "Kick: Standard" & result_value < 100) ~ "<tc",
+                                 (collection_method %in% "Kick: Sandy Stream" & result_value < 100) ~ "<tc",
+                                 (collection_method %in% "Multiplate: Navigable" & result_value < 250) ~ "<tc",
+                                 (collection_method %in% "Multiplate: Non-Navigable" & result_value < 250) ~ "<tc",
+                                 (collection_method %in% "Low Gradient" & result_value < 200) ~ "<tc",
+                                 (collection_method %in% "Lake Composite" & result_value < 300) ~ "<tc",
+                                 TRUE ~ ""
+                                 )) %>% 
+filter(result_qualifier %in% "<tc" )
+#subset the event ids that will need the <tc for the final bap score 
+event_ids_tc.l<-unique(event_ids_tc$event_id)
+
+prepped_metrics2<-prepped_metrics2 %>% 
+  mutate(result_qualifier = case_when(
+    event_id %in% event_ids_tc.l ~ "<tc",
+    TRUE ~ ""
+  ),
+  result_qualifier_description = case_when(
+    (event_id %in% event_ids_tc.l & parameter_name %in% "bioassessment_profile")~ "total macroinvertebrate count not met for method in SOP 214, Biological Enumeration",
+    TRUE ~ ""
+  ))
+  
+#I was going to update the collection method - but htat looks like it's part of hte sample table, so i will do it here and not in the results table
+prepped_sample_table2<-prepped_sample_table %>% 
+  mutate(sample_method = case_when(
+    collection_method %in% "Kick: Standard" ~ "kick_standard",
+    collection_method %in% "Multiplate: Navigable" ~ "multiplate_navigable",
+    collection_method %in% "Multiplate: Non-Navigable" ~ "multiplate_non-navigable",
+    collection_method %in% "Sediment Ponar" ~ "sediment_ponar",
+    collection_method %in% "Kick: Sandy Stream" ~ "kick_sandy-stream",
+    collection_method %in% "Kick: Headwater Stream" ~ "kick_standard",
+    collection_method %in% "Multihabitat: Lake" ~ "multihabitat_lake",
+    collection_method %in% "Low-Gradient" ~ "low_gradient",
+    collection_method %in% "Lake: Ponar" ~ "lake_ponar",
+    collection_method %in% "Lake: Littoral" ~ "lake_littoral",
+    collection_method %in% "Other: Various (Historical)" ~ "ther_various-historical",
+   TRUE ~ "unknown"
+  ))
+
+ ```
+
+
+
 Write these to the staging area
 
-```{r}
+
+```{r final-writing}
 
 
 saveRDS(
-  object = prepped_metrics,
+  object = prepped_metrics2,
   file = file.path(
     "L:",
     "DOW",
@@ -862,7 +949,7 @@ saveRDS(
 )
 
 saveRDS(
-  object = prepped_sample_table,
+  object = prepped_sample_table2,
   file = file.path(
     "L:",
     "DOW",
