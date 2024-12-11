@@ -156,43 +156,37 @@ final_metrics_2$EVENT_ID<-NULL #remove the event id as it's not in the right for
 Site corrections from the look-up file from Charlie
 
 ```{r site-id-corrections}
-sites_survey_24<-readxl::read_excel("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/siteIdCrosswalkTable_v2.xlsx")
-#this is just for 2024
-
-sites_24<-sites_survey_24 %>% 
-    select(finalSiteID,revisedOriginalSiteID, eventSMASId_2,eventSMASSampleDate) %>% 
-  rename(finalSiteCode = finalSiteID,
-         UnadjustedOriginalSiteCode = revisedOriginalSiteID,
-         EVENT_ID = eventSMASId_2,
-         DATE = eventSMASSampleDate) %>% 
-  mutate(DATE = as.Date(DATE,"%m/%d/%Y")) %>% 
-  distinct()
-
 
 #read in the 2023 ones
-sites_survey_23<-readxl::read_excel("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/draft_2023_crosswalk_table_v1_2024-12-04.xlsx")
+sites_survey_23<-readxl::read_excel("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/siteIdCrosswalkTable2023_v1.xlsx")
+sites_survey_24<-readxl::read_excel("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/siteIdCrosswalkTable2024_v3.xlsx")
 
 
 sites_23<-sites_survey_23 %>% 
-  select(finalSiteCode,UnadjustedOriginalSiteCode, SEIH_EVENT_SMAS_SAMPLE_DATE,SEIH_SMAS_ARRIVETIME) %>% 
-  mutate(date = format(as.Date(SEIH_EVENT_SMAS_SAMPLE_DATE, "%m/%d/%y"), "%Y%m%d"),
-         time = paste(SEIH_SMAS_ARRIVETIME),
-         time = stringr::str_replace(time,":",""))%>% 
-  mutate(EVENT_ID = paste(finalSiteCode,date,sep = "_"),
-         EVENT_ID = paste(EVENT_ID,time,sep = "T"))
-
-
-sites_23<-sites_23 %>% 
-  select(UnadjustedOriginalSiteCode,finalSiteCode,EVENT_ID, SEIH_EVENT_SMAS_SAMPLE_DATE) %>% 
+  select(SITE_CODE,ORIGINAL_SITE_CODE, SEIH_EVENT_SMAS_SAMPLE_DATE,SEIH_SMAS_ARRIVETIME,eventSMASId) %>% 
+  mutate(EVENT_ID = eventSMASId,
+         DATE = SEIH_EVENT_SMAS_SAMPLE_DATE) %>% 
+  mutate(DATE = as.Date(DATE, "%m/%d/%y")) %>% 
   distinct() %>% 
-  rename(DATE = SEIH_EVENT_SMAS_SAMPLE_DATE) %>% 
-  mutate(DATE = as.Date(DATE, "%m/%d/%y"))
+  select(c(SITE_CODE,ORIGINAL_SITE_CODE,EVENT_ID,DATE))
+
+sites_24<-sites_survey_24 %>% 
+    select(finalSiteID,revisedOriginalSiteID, eventSMASSampleDate,eventSMASArrivetime,eventSMASId_2) %>% 
+  mutate(EVENT_ID = eventSMASId_2,
+         DATE = eventSMASSampleDate) %>% 
+  mutate(DATE = as.Date(DATE, "%m/%d/%Y")) %>% 
+  rename(ORIGINAL_SITE_CODE = revisedOriginalSiteID,
+         SITE_CODE = finalSiteID) %>% 
+  distinct() %>% 
+  select(c(SITE_CODE,ORIGINAL_SITE_CODE,EVENT_ID,DATE))
 
 #combine 23 and 24
 sites_23_24<-rbind(sites_23,
                    sites_24) %>% 
-  rename(site_id = UnadjustedOriginalSiteCode)# number of rows match here for the rbind
-
+  rename(site_id = ORIGINAL_SITE_CODE,
+         final_id = SITE_CODE)# number of rows match here for the rbind
+sites_23_24<-sites_23_24 %>% 
+  distinct()
 
 #ok now we'll bind to the final_metrics_2 df before we adjust for WQMA compatability
 
@@ -206,10 +200,10 @@ final_metrics_3<-left_join(
 
 #let's look at the ones that didnt join
 missing_events<-final_metrics_3 %>% 
-  subset(is.na(finalSiteCode))
+  subset(is.na(final_id))
 
 
-#site adjustments based on the join - there will likely be some here that do not exist and need to be created? Re run lines 197-205 after corrections are made
+#site adjustments based on the join - there will likely be some here that do not exist and need to be created
 
 final_metrics_4<-final_metrics_3 %>% #first correct dates that don't match the surveys
   mutate(site_id = case_when(site_id %in% '11-LHUD-117.1'~'13-LHUD-117.1',
@@ -233,7 +227,7 @@ final_metrics_4<-final_metrics_3 %>% #first correct dates that don't match the s
 
 #check for missing sites again - first remove the old joined columns since they will re-join and mess it up
 final_metrics_4<-final_metrics_4 %>% 
-  select(-c(finalSiteCode,EVENT_ID))
+  select(-c(final_id,EVENT_ID))
 
 final_metrics_4<-left_join(
   final_metrics_4,
@@ -243,7 +237,10 @@ final_metrics_4<-left_join(
 
 #let's look at the ones that didnt join
 missing_events<-final_metrics_4 %>% 
-  subset(is.na(finalSiteCode))
+  subset(is.na(final_id))
+
+
+
 
 #make notes for these
 missing_events<-missing_events %>% 
@@ -262,6 +259,7 @@ missing_events<-missing_events %>%
     site_id %in% "11-WPBR-0.6" ~"T",
     site_id %in% "12-SIMB-0.5" ~"T",
     site_id %in% "13-LHUD-117.1" ~"T",
+    site_id %in% "11-UHUD-42.5" ~ "F",
     TRUE~"F")) %>% 
   mutate(missing_survey = case_when(
       site_id %in% "10-CADE-6.2"~"T",
@@ -274,6 +272,8 @@ missing_events<-missing_events %>%
     site_id %in% "11-JONS-2.1" ~"T",
     site_id %in% "11-WPBR-0.6" ~"T",
     site_id %in% "12-SIMB-0.5" ~"T",
+    site_id %in% "11-UHUD-42.5" ~ "T",
+    
     TRUE~"F"
   )) %>% 
     mutate(notes = case_when(
@@ -287,6 +287,7 @@ missing_events<-missing_events %>%
     site_id %in% "11-JONS-2.1" ~"Not in sites table or 23 site selection",
     site_id %in% "11-WPBR-0.6" ~"Not in sites table or 23 site selection",
     site_id %in% "12-SIMB-0.5" ~"Not in sites table or 23 site selection",
+    site_id %in% "11-UHUD-42.5" ~ "no matching dates for this site",
     TRUE~"F"))
 
 #checked - these do not exist in the existing survey checks OR the 2023 that are in the database
@@ -298,8 +299,15 @@ missing_events<-missing_events %>%
 final_metrics_4<-final_metrics_4 %>% 
   mutate(EVENT_ID = case_when(
     site_id %in% "11-ARCH-1.9"~"11-ARCH-1.9_20230918T1200",
+    site_id %in% "10-CHUB-2.2" ~ "10-CHUB-2.2_20230726T1200",
+    site_id %in% "10-SABL-0.4"~ "10-SABL_E-0.4_20230726T1230",
+    site_id %in% "13-WAPP_E-3.2" ~ "13-WAPP_E-3.2_20240718T1038",
     TRUE ~ EVENT_ID
-  ))
+  ),
+  final_id = case_when(
+    site_id %in% "10-SABL-0.4" ~ "10-SABL_E-0.4",
+    site_id %in% "11-ARCH-1.9" ~ "11-ARCH-1.9",
+    TRUE ~ final_id))
 
 #subset to the complete ones for creating the .RDS files
 final_metrics_5<-final_metrics_4 %>% 
@@ -307,13 +315,18 @@ final_metrics_5<-final_metrics_4 %>%
 
 #clean it up
 final_metrics_5<-final_metrics_5 %>% 
-  mutate(MSSIH_EVENT_SMAS_HISTORY_ID = finalSiteCode,
+  mutate(MSSIH_EVENT_SMAS_HISTORY_ID = final_id,
          MSSIH_EVENT_SMAS_SAMPLE_DATE = DATE) %>% #make all the columns agree
   select(-c(new_DATE,date))
 
 #write to file
-# write.csv(final_metrics_5,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_metrics_cleaned_preWQMAval.csv")
+#write.csv(final_metrics_5,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_metrics_cleaned_preWQMAval.csv")
 
+
+
+```
+
+```{r create-new-sample-final}
 #create new sample file as well
 
 sample_final<-final_metrics_5 %>% 
@@ -332,15 +345,15 @@ sample_final_2<-left_join(sample_final,samp_small,
 if (nrow(sample_final_2) != nrow(final_metrics_5)) {stop("Number of rows don't match, check the matching")}
 
 #save to file
-# write.csv(sample_final_2,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_sample_inf_cleaned_preWQMAval.csv")
-
+ #write.csv(sample_final_2,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_sample_inf_cleaned_preWQMAval.csv")
 ```
+
 
 Convert data to new format using Zach's code
 https://github.com/BWAM/data_warehouse_prep/blob/main/R/s_macro_metrics.R
 
 
-Prep the macro sample file for the WQMA database; for now we can create a dummy s_event file since we do not have it yet (as of 12/5/24)
+Prep the macro sample file for the WQMA database
 
 ```{r grab-event-table}
 
@@ -836,6 +849,7 @@ prepped_sample_table %>% skim()
 #fix Archer creek AGAIN
 prepped_sample_table<-prepped_sample_table %>% 
   mutate(site_id = case_when(event_id %in% "11-ARCH-1.9_20230918T1200" ~ "11-ARCH-1.9",
+                             event_id %in% "13-WAPP_E-3.2_20240718T1038" ~ "13-WAPP_E-3.2",
                              TRUE~site_id))
 
 ```
@@ -846,27 +860,10 @@ prepped_sample_table<-prepped_sample_table %>%
 data(columns_dictionary, package = "nexus")
 
 str(prepped_metrics)
-
-
-
-#NA checks
-
-# Option 1 (Recommended)
-option1 <- df |> 
-  replace_na(
-    list(
-      b = "missing",
-      c = "not-applicable"
-    )
-  )
-
-
-
+str(prepped_sample_table)
 
 ```
-
-```{r update-flags-and-description}
-
+```{r}
 #check metrics fall within specified range
 check<-prepped_metrics %>% 
   filter(parameter_name %in% "bioassessment_profile")
@@ -924,14 +921,11 @@ prepped_sample_table2<-prepped_sample_table %>%
    TRUE ~ "unknown"
   ))
 
- ```
+```
 
+Write to the staging area
 
-
-Write these to the staging area
-
-
-```{r final-writing}
+```{r update-flags-and-description}
 
 
 saveRDS(
