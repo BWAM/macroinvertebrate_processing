@@ -4,7 +4,7 @@ author: 'NYSDEC SMAS : Keleigh Reynolds'
 date: "2/3/2021"
 output: html_document
 params:
-  file_name: "Esopus_MacroData_2021.csv"
+  file_name: "L:/DOW/BWAM Share/data/lab_data/WAA/2023/Copy of MacroTaxa_470.23-078_085.csv"
   user: kareynol
   file_type: "waa"
 ---
@@ -23,8 +23,18 @@ source("functions.R")
 #first read in the raw file
 #raw<-readxl::read_excel("C:/Users/kareynol/Desktop/R_SMAS/macro_processing_in_house/data/SampData_2018.xlsx")
 
-raw<-read.csv(here::here(paste("data/",params$file_name,sep = "")),stringsAsFactors = FALSE)
+#raw<-read.csv(here::here(paste("data/",params$file_name,sep = "")),stringsAsFactors = FALSE)
 
+#raw<-read.csv("C:/Users/kareynol/OneDrive - New York State Office of Information Technology Services/Desktop/raw/Copy of USGS_540_13_MacroTaxaOutput.csv") #for scott george
+
+#12/6/2022 merge all the new files to get the table correct
+# raw2<-read.csv(here::here("data/MacroData_2021_kar.csv"))
+# raw3<-read.csv(here::here("data/Esopus_MacroData_2021.csv"))
+# raw3$X._Grids<-""
+# raw_all<-rbind(raw,raw2,raw3)
+#raw<-raw_all
+
+raw<-read.csv("L:/DOW/BWAM Share/data/lab_data/WAA/2023/raw/Copy of MacroTaxa_470.23-078_085.csv")
 
 if(params$file_type=="internal"){m_data_prep(raw)}
 
@@ -38,14 +48,35 @@ if(params$file_type=="waa"){waa_data_prep(raw)
 ## Run the species QA script to see if any are not matching the Master table.
 
 ```{r}
+#check to see if there is a file called "newly_found_species.csv" in the outputsfolder. If there is, please rename it 
 site_check(prepped_df)
 
 species_check(prepped_df)
+
+#for 2022 data
+# prepped_df<-prepped_df %>%
+#   mutate(MSDH_GENSPECIES=case_when(
+#     MSDH_GENSPECIES == "neoleptophlebia_sp."~"undetermined_leptophlebiidae",
+#     TRUE~MSDH_GENSPECIES))
+# 
+# #for 2022 lakes data - 10/24/2023
+# 
+# prepped_df<-prepped_df3 %>% 
+#   #subset(site_id != "HWF") %>% 
+#   subset(site_id == "04-LHONYE-1.0") %>% 
+#   subset(site_id == "04-LHONYE-0.0")
+
 ```
 
 ```{r}
 #prep for tables for Data Mod: this will do the macro species sample event table and the 
 #Sample info history tables, and save it to the outputs folder with today's date.
+
+#remove weird ones for now 2022-remove from sample event too
+prepped_df<-prepped_df %>%
+  subset(site_id != "HWF") %>%
+  subset(site_id != "04-LHONYE-1.0") %>%
+  subset(site_id != "04-LHONYE-0.0")
 
 if (params$file_type=="internal"){tables_1_2(prepped_df)}
 if (params$file_type=="waa"){tables_1_2.waa(prepped_df)}
@@ -56,14 +87,27 @@ if (params$file_type=="waa"){tables_1_2.waa(prepped_df)}
 #Run BAP and create BAP entry for table
 library(BAP)
 
+#remove weird ones for now 2022
+prepped_df<-prepped_df %>%
+  subset(site_id != "HWF") %>%
+  subset(site_id != "04-LHONYE-1.0") %>%
+  subset(site_id != "04-LHONYE-0.0")
+
 #run BAP's data prep on the raw file
 bap.prepped<-BAP::data_prep(prepped_df)
+#2022 data fixes, references seemed odd
+bap.prepped$REFERENCE<-""
+bap.prepped<-bap.prepped %>% 
+  distinct()
+
+
 
 #split by collection method and run the appropriate BA
 bap.final<-apply_bap(bap.prepped)
 
 #create metric file with correct names
-metric_table(bap.final)
+metrics_final<-metric_table(bap.final)
+
 
 ```
 
@@ -74,13 +118,13 @@ metric_table(bap.final)
 #read in the existing tables
 
 #sample event
-sample.f<-read.csv(dir(paste("C:/Users/",params$user,"/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/Cleaned Files/Final_Macro_ITS/",sep=""),full.names = T, pattern="*S_MACRO_SPECIES_SAMP_INF_HIST.csv"),stringsAsFactors = FALSE)
+sample.f<-read.csv(dir("L:/DOW/BWAM Share/data/streams/cleaned_files/Final_Macro_ITS/",full.names = T, pattern="*S_MACRO_SPECIES_SAMP_INF_HIST.csv"))
 
 #species history
-species.f<-read.csv(dir(paste("C:/Users/",params$user,"/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/Cleaned Files/Final_Macro_ITS/",sep=""),full.names = T, pattern="*S_MACRO_SPECIES_DATA_HISTORY.csv"),stringsAsFactors = FALSE)
+species.f<-read.csv(dir("L:/DOW/BWAM Share/data/streams/cleaned_files/Final_Macro_ITS/",full.names = T, pattern="*S_MACRO_SPECIES_DATA_HISTORY.csv"))
 
 #metrics
-metrics.f<-read.csv(dir(paste("C:/Users/",params$user,"/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/Cleaned Files/Final_Macro_ITS/",sep=""),full.names = T, pattern="*S_MACRO_METRICS_DATA_HISTORY.csv"),stringsAsFactors = FALSE)
+metrics.f<-read.csv(dir("L:/DOW/BWAM Share/data/streams/cleaned_files/Final_Macro_ITS/",full.names = T, pattern="*S_MACRO_METRICS_DATA_HISTORY.csv"))
 
 #append each of them
 
@@ -88,23 +132,43 @@ metrics.f<-read.csv(dir(paste("C:/Users/",params$user,"/New York State Office of
 time=Sys.Date()
 time.t=format(time,"%Y%m%d")
 
+samp_event<-samp_event %>% 
+  mutate(MSSIH_EVENT_SMAS_SAMPLE_DATE=format(
+    as.Date(MSSIH_EVENT_SMAS_SAMPLE_DATE,"%m-%d-%Y"),
+    "%m/%d/%Y")) %>% 
+  mutate(MSSIH_TOTAL_INDIV_CNT=round(MSSIH_TOTAL_INDIV_CNT,digits = 0))
+
+
+
 #first sample event
-sample.new<-rbind(sample.f,samp_event)
+sample.new<-rbind(sample.f,samp_event,all=TRUE)
 
 sample.new [is.na(sample.new)] <- ""
+sample.new<-sample.new %>% 
+  filter(MSSIH_LINKED_ID_VALIDATOR != "TRUE")
 
-write.csv(sample.new,paste("C:/Users/",params$user,"/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/Cleaned Files/Final_Macro_ITS/",
+write.csv(sample.new,paste("L:/DOW/BWAM Share/data/streams/cleaned_files/Final_Macro_ITS/",
                                 time.t,"_S_MACRO_SPECIES_SAMP_INF_HIST.csv",sep = ""),row.names = FALSE)
 
-species_history<-species_history %>% 
-  dplyr::rename(MSDH_INDIVIDUAL_SPECIES_CNT=MSSIH_TOTAL_INDIV_CNT)
+# species_history<-species_history %>% 
+#   dplyr::rename(MSDH_INDIVIDUAL_SPECIES_CNT=MSSIH_TOTAL_INDIV_CNT)#this is where it went wrong
 
+#fix dates and subset
+
+
+species_history$MSDH_INDIVIDUAL_SPECIES_CNT<-round(
+  species_history$MSDH_INDIVIDUAL_SPECIES_CNT,digits = 0
+)
+
+species.f$MSDH_INDIVIDUAL_SPECIES_CNT<-round(
+  species.f$MSDH_INDIVIDUAL_SPECIES_CNT,digits = 0
+)
 #then the raw species
 species.new<-rbind(species.f,species_history)
 
 species.new [is.na(species.new)] <- ""
 
-write.csv(species.new,paste("C:/Users/",params$user,"/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/Cleaned Files/Final_Macro_ITS/",
+write.csv(species.new,paste("L:/DOW/BWAM Share/data/streams/cleaned_files/Final_Macro_ITS/",
                                 time.t,"_S_MACRO_SPECIES_DATA_HISTORY.csv",sep = ""),row.names = FALSE)
 
 #then metrics
@@ -113,12 +177,37 @@ metrics.new<-full_join(metrics.f,metrics.subset) #need the full join since the m
 metrics.new [is.na(metrics.new)] <- ""
 
 
-write.csv(metrics.new,paste("C:/Users/",params$user,"/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/Cleaned Files/Final_Macro_ITS/",
+write.csv(metrics.new,paste("L:/DOW/BWAM Share/data/streams/cleaned_files/Final_Macro_ITS/",
                                 time.t,"_S_MACRO_METRICS_DATA_HISTORY.csv",sep = ""),row.names = FALSE)
 
 
 
 ```
+
+```{r update_metrics_all_file}
+
+metrics.all<-
+  merge(metrics.f,
+        sample.f,
+        by =c("MSSIH_EVENT_SMAS_HISTORY_ID",
+              "MSSIH_EVENT_SMAS_SAMPLE_DATE",
+              "MSSIH_BIOSAMPLE_COLLECT_METHOD",
+              "MSSIH_REPLICATE",
+              "MSSIH_GROUP"))
+
+
+metrics.all<-merge(metrics.f,
+                   sample.f,
+                   by="MMDH_LINKED_ID_VALIDATOR")
+
+metrics.all<-metrics.all %>% distinct()
+
+metrics.all [is.na(metrics.all)] <- ""
+
+
+```
+
+
 
 ```{r}
 #make the metrics with all fields csv
@@ -130,7 +219,7 @@ metrics.all [is.na(metrics.all)] <- ""
 
 
 #save file
-write.csv(metrics.all,paste("C:/Users/",params$user,"/New York State Office of Information Technology Services/SMAS - Streams Data Modernization/Cleaned Files/Final_Macro_ITS/",
+write.csv(metrics.all,paste("L:/DOW/BWAM Share/data/streams/cleaned_files/Final_Macro_ITS/",
                                 time.t,"metrics.with.all.fields.csv",sep = ""),row.names = FALSE)
 
 
