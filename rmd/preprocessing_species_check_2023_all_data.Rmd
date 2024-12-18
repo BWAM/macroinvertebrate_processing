@@ -67,8 +67,8 @@ setdiff(sites.raw,sites.merged) # Yes confirmed it is Archer Creek, which was re
 #prep for tables for Data Mod: this will do the macro species sample event table and the 
 #Sample info history tables, and save it to the outputs folder with today's date. Hashed out for this review
 
-#if (params$file_type=="internal"){tables_1_2(prepped_df)}
-#if (params$file_type=="waa"){tables_1_2.waa(prepped_df)}
+if (params$file_type=="internal"){tables_1_2(prepped_df)}
+if (params$file_type=="waa"){tables_1_2.waa(prepped_df)}
 
 ```
 
@@ -239,9 +239,6 @@ final_metrics_4<-left_join(
 missing_events<-final_metrics_4 %>% 
   subset(is.na(final_id))
 
-
-
-
 #make notes for these
 missing_events<-missing_events %>% 
   mutate(notes = "",
@@ -302,11 +299,14 @@ final_metrics_4<-final_metrics_4 %>%
     site_id %in% "10-CHUB-2.2" ~ "10-CHUB-2.2_20230726T1200",
     site_id %in% "10-SABL-0.4"~ "10-SABL_E-0.4_20230726T1230",
     site_id %in% "13-WAPP_E-3.2" ~ "13-WAPP_E-3.2_20240718T1038",
+    site_id %in% "10-JACK-0.2" ~ "10-JKBR-0.2_20230726T1030",
     TRUE ~ EVENT_ID
   ),
   final_id = case_when(
     site_id %in% "10-SABL-0.4" ~ "10-SABL_E-0.4",
     site_id %in% "11-ARCH-1.9" ~ "11-ARCH-1.9",
+    site_id %in% "10-JACK-0.2" ~ "10-JKBR-0.2",
+    site_id %in% "13-WAPP_E-3.2" ~ "13-WAPP_E-3.2",
     TRUE ~ final_id))
 
 #subset to the complete ones for creating the .RDS files
@@ -317,10 +317,11 @@ final_metrics_5<-final_metrics_4 %>%
 final_metrics_5<-final_metrics_5 %>% 
   mutate(MSSIH_EVENT_SMAS_HISTORY_ID = final_id,
          MSSIH_EVENT_SMAS_SAMPLE_DATE = DATE) %>% #make all the columns agree
-  select(-c(new_DATE,date))
+  select(-c(new_DATE,date)) %>% 
+  distinct()
 
 #write to file
-#write.csv(final_metrics_5,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_metrics_cleaned_preWQMAval.csv")
+# write.csv(final_metrics_5,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_metrics_cleaned_preWQMAval.csv")
 
 
 
@@ -337,11 +338,18 @@ samp_small<-final_event %>%
   select(c(MSSIH_LINKED_ID_VALIDATOR, #we cna use the originally created linked validator to join
            MSSIH_TAXONOMIST,
            MSSIH_TOTAL_INDIV_CNT,
-           MSSIH_TOTAL_INDIV_CNT_NOTE))
+           MSSIH_TOTAL_INDIV_CNT_NOTE)) %>% 
+  distinct()
   
 sample_final_2<-left_join(sample_final,samp_small,
                           by = "MSSIH_LINKED_ID_VALIDATOR") #total rows match the original
+
+sample_final_2<-sample_final_2 %>% 
+  distinct()
 #create check
+final_metrics_5<-final_metrics_5 %>% 
+  distinct()
+
 if (nrow(sample_final_2) != nrow(final_metrics_5)) {stop("Number of rows don't match, check the matching")}
 
 #save to file
@@ -594,6 +602,7 @@ macro_event_corrections <- function(df) {
       "13-LHUD_T299-2.5_20220720" ~ "13-LHUD_T229-2.5_20220720",
       "13-WFKIL-0.1_20220721" ~ "13-WFKIL-0.4_20220721",
       "16-SUSQ-25.2_20220712" ~ "06-SUSQ-25.2_20220712",
+      "10-JACK-0.2_20230726T1030" ~ "10-JKBR-0.2_20230726T1030", # fixing the site that doesn't match - same name as another waterbody 
       .default = event_id
     )
   ) 
@@ -673,7 +682,22 @@ prep_s_macro_sample <- function(x, s_event) {
 
 #run the functions
 imported_sample<-import_s_macro_sample(data_dir)
-prepped_sample_table<-prep_s_macro_sample(imported_sample,s_event = s_event_2023)
+prepped_sample_table<-prep_s_macro_sample(imported_sample,s_event = s_event_2023) 
+
+setdiff(prepped_sample_table$event_id, imported_sample$EVENT_ID) 
+imported_sample_check<-imported_sample %>% 
+  mutate(check = paste(MSSIH_EVENT_SMAS_HISTORY_ID,MSSIH_REPLICATE)) %>% 
+  select(check,MSSIH_EVENT_SMAS_HISTORY_ID)
+
+prepped_sample_table_check<-prepped_sample_table %>% 
+  mutate(check = paste(site_id,replicate)) %>% 
+  select(check)
+
+setdiff(prepped_sample_table_check$check, imported_sample_check$check)
+
+check<-left_join(imported_sample_check, prepped_sample_table_check)
+
+
 
 ```
 
@@ -832,7 +856,7 @@ prepped_metrics<-prepped_metrics %>%
   select(-c(site_id.y)) %>% 
   rename(site_id = site_id.x)
 
-
+# New names:Warning: The following named parsers don't match the column names: MMDH_PCT_DOMINANCE_3, MMDH_PCT_DOMINANCE_3_SCORE - this is the warning we get, this is because i dont have any metrics that use those columns in this batch.
 
 ```
 
@@ -850,19 +874,20 @@ prepped_sample_table %>% skim()
 prepped_sample_table<-prepped_sample_table %>% 
   mutate(site_id = case_when(event_id %in% "11-ARCH-1.9_20230918T1200" ~ "11-ARCH-1.9",
                              event_id %in% "13-WAPP_E-3.2_20240718T1038" ~ "13-WAPP_E-3.2",
+                             event_id %in% "10-JKBR-0.2_20230726T1030" ~ "10-JKBR-0.2",
                              TRUE~site_id))
 
-```
-
-
-```{r data-checks}
-#checking data types
-data(columns_dictionary, package = "nexus")
-
-str(prepped_metrics)
-str(prepped_sample_table)
+prepped_metrics<-prepped_metrics %>% 
+  mutate(site_id = case_when(event_id %in% "11-ARCH-1.9_20230918T1200" ~ "11-ARCH-1.9",
+                             event_id %in% "13-WAPP_E-3.2_20240718T1038" ~ "13-WAPP_E-3.2",
+                             event_id %in% "10-JKBR-0.2_20230726T1030" ~ "10-JKBR-0.2",
+                             TRUE~site_id))
+  
 
 ```
+
+
+
 ```{r}
 #check metrics fall within specified range
 check<-prepped_metrics %>% 
@@ -920,6 +945,10 @@ prepped_sample_table2<-prepped_sample_table %>%
     collection_method %in% "Other: Various (Historical)" ~ "ther_various-historical",
    TRUE ~ "unknown"
   ))
+
+#make all column names capital
+names(prepped_metrics2) <- base::toupper(names(prepped_metrics2))
+names(prepped_sample_table2)<-base::toupper(names(prepped_sample_table2))
 
 ```
 
