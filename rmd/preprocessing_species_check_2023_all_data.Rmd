@@ -942,13 +942,75 @@ prepped_sample_table2<-prepped_sample_table %>%
     collection_method %in% "Low-Gradient" ~ "low_gradient",
     collection_method %in% "Lake: Ponar" ~ "lake_ponar",
     collection_method %in% "Lake: Littoral" ~ "lake_littoral",
-    collection_method %in% "Other: Various (Historical)" ~ "ther_various-historical",
+    collection_method %in% "Other: Various (Historical)" ~ "other_various-historical",
    TRUE ~ "unknown"
   ))
 
 #make all column names capital
 names(prepped_metrics2) <- base::toupper(names(prepped_metrics2))
 names(prepped_sample_table2)<-base::toupper(names(prepped_sample_table2))
+
+#adding parameter table columns and missing result table columns
+prepped_metrics3<-prepped_metrics2 %>% 
+  mutate(CASRN = "not_applicable",
+         FRACTION = "not_applicable",
+         MATRIX = "not_applicable",
+         METHOD_SPECIATION = "not_applicable",
+         UNIT = "not_applicable",
+         DETECT_FLAG = "not_applicable",
+         DETECTION_LIMIT_UNIT = "not_applicable",
+         FINAL_VOLUME_UNIT = "not_applicable",
+         LAB_ANALYTICAL_METHOD = "not_applicable",
+         ANALYSIS_DATETIME = as.POSIXct(NA),
+         DILUTION_FACTOR = as.numeric(NA),
+         FINAL_VOLUME = as.numeric(NA),
+         FINAL_VOLUME_UNIT = "not_applicable",
+         LAB_ANALYTICAL_METHOD = "not_applicable",
+         LAB_QUALIFIER = "",
+         LAB_SAMPLE_ID = "not_applicable",
+         LAB_VALIDATION_LEVEL = "",
+         METHOD_DETECTION_LIMIT = as.numeric(NA),
+         PREP_DATETIME = as.POSIXct(NA),
+         PREP_METHOD = "not_applicable",
+         QUALIFIER_SOURCE = "not_applicable",
+         QUANTITATION_LIMIT = as.numeric(NA),
+         REPORTABLE_RESULT = "not_applicable",
+         REPORTING_DETECTION_LIMIT = as.numeric(NA),
+         RESULT_COMMENT = "none",
+         RESULT_QUALIFIER_NOTE = "not_applicable",
+         RESULT_TYPE_CODE = "not_applicable",
+         SUBSAMPLE_AMOUNT = as.numeric(NA),
+         SUBSAMPLE_AMOUNT_UNIT = "not_applicable",
+         TEST_TYPE = "not_applicable") %>% 
+    mutate(SAMPLE_METHOD = case_when(
+    COLLECTION_METHOD %in% "Kick: Standard" ~ "kick_standard",
+    COLLECTION_METHOD %in% "Multiplate: Navigable" ~ "multiplate_navigable",
+    COLLECTION_METHOD %in% "Multiplate: Non-Navigable" ~ "multiplate_non-navigable",
+    COLLECTION_METHOD %in% "Sediment Ponar" ~ "sediment_ponar",
+    COLLECTION_METHOD %in% "Kick: Sandy Stream" ~ "kick_sandy-stream",
+    COLLECTION_METHOD %in% "Kick: Headwater Stream" ~ "kick_standard",
+    COLLECTION_METHOD %in% "Multihabitat: Lake" ~ "multihabitat_lake",
+    COLLECTION_METHOD %in% "Low-Gradient" ~ "low_gradient",
+    COLLECTION_METHOD %in% "Lake: Ponar" ~ "lake_ponar",
+    COLLECTION_METHOD %in% "Lake: Littoral" ~ "lake_littoral",
+    COLLECTION_METHOD %in% "Other: Various (Historical)" ~ "other_various-historical",
+   TRUE ~ "unknown"
+  )) %>%
+  #adding the missing sample columns, first change the name and then get the rest
+rename(SAMPLE_LOCATION = SAMPLING_LOCATION,
+       SAMPLE_ORGANIZATION = ORGANIZATION_NAME) %>% 
+  mutate(
+    SAMPLE_DELIVERY_GROUP = "not_applicable",
+    SAMPLE_DEPTH_METERS = as.numeric(NA),
+    SAMPLE_LATITUDE = as.numeric(NA),
+    SAMPLE_LONGITUDE = as.numeric(NA),
+    SAMPLE_NAME = "unknown",
+    SAMPLE_METHOD_REFERENCE = "SOP#216",
+    SAMPLE_METHOD_DESCRIPTION = "kick_net",
+    SAMPLE_LAB = "WAA",
+    SAMPLE_COMMENT = "none") %>% 
+  select(-c(COLLECTION_METHOD))
+
 
 ```
 
@@ -958,7 +1020,7 @@ Write to the staging area
 
 
 saveRDS(
-  object = prepped_metrics2,
+  object = prepped_metrics3,
   file = file.path(
     "L:",
     "DOW",
