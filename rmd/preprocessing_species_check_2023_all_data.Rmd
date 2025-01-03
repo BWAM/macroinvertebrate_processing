@@ -1014,6 +1014,49 @@ rename(SAMPLE_LOCATION = SAMPLING_LOCATION,
 
 ```
 
+
+```{r check the columns}
+#frist read in a small result from the results table
+build_dir <- file.path(
+  "L:",
+  "DOW",
+  "BWAM Share",
+  "data",
+  "parquet",
+  "build_tables")
+
+result_df <- arrow::open_dataset(sources = file.path(build_dir, "RESULT.parquet")) |> 
+  filter(LAB_SAMPLE_ID %in% "R1202229-011") %>% #trying to limit it so the collection isnt crazy
+  distinct() %>% 
+  collect()
+
+check<-janitor::compare_df_cols(result_df, 
+                         prepped_metrics3, 
+                         return = "mismatch")
+
+#wow idk why i thought there would definitely be differences...nice job!
+
+#same for the sample table
+
+sample_df <- arrow::open_dataset(sources = file.path(build_dir, "SAMPLE.parquet")) |> 
+  filter(SAMPLE_DELIVERY_GROUP %in% "R1603723") %>% #trying to limit it so the collection isnt crazy
+  distinct() %>% 
+  collect()
+
+check<-janitor::compare_df_cols(sample_df, 
+                         prepped_sample_table2, 
+                         return = "mismatch")
+
+prepped_sample_table2<-prepped_sample_table2 %>% 
+  mutate(REPLICATE = as.character(REPLICATE))
+
+check<-janitor::compare_df_cols(sample_df, 
+                         prepped_sample_table2, 
+                         return = "mismatch")
+
+```
+
+
 Write to the staging area
 
 ```{r update-flags-and-description}
