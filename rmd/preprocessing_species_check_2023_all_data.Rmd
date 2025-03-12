@@ -158,33 +158,35 @@ Site corrections from the look-up file from Charlie
 ```{r site-id-corrections}
 
 #read in the 2023 ones
-sites_survey_23<-readxl::read_excel("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/siteIdCrosswalkTable2023_v1.xlsx")
-sites_survey_24<-readxl::read_excel("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/siteIdCrosswalkTable2024_v4.xlsx")
+sites_survey_23<-readxl::read_excel("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/siteIdCrosswalkTable2023_v3_2025_01_30.xlsx")
+sites_survey_24<-readxl::read_excel("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/siteIdCrosswalkTable2024_v4_2025_01_27.xlsx")
 
 
 sites_23<-sites_survey_23 %>% 
-  select(SITE_CODE,ORIGINAL_SITE_CODE, SEIH_EVENT_SMAS_SAMPLE_DATE,SEIH_SMAS_ARRIVETIME,eventSMASId) %>% 
+  select(finalSiteID,revisedOriginalSiteID, eventSMASSampleDate,eventSMASArrivetime,eventSMASId) %>% 
   mutate(EVENT_ID = eventSMASId,
-         DATE = SEIH_EVENT_SMAS_SAMPLE_DATE) %>% 
+         DATE = eventSMASSampleDate) %>% 
   mutate(DATE = as.Date(DATE, "%m/%d/%y")) %>% 
   distinct() %>% 
-  select(c(SITE_CODE,ORIGINAL_SITE_CODE,EVENT_ID,DATE))
+  select(c(finalSiteID,revisedOriginalSiteID,EVENT_ID,DATE))
 
 sites_24<-sites_survey_24 %>% 
-    select(finalSiteID,revisedOriginalSiteID, eventSMASSampleDate,eventSMASArrivetime,eventSMASId_2) %>% 
-  mutate(EVENT_ID = eventSMASId_2,
-         DATE = eventSMASSampleDate) %>% 
+  select(finalSiteID,revisedOriginalSiteID, eventSMASSampleDate,eventSMASArrivetime) %>% 
+  mutate(DATE = eventSMASSampleDate) %>% 
   mutate(DATE = as.Date(DATE, "%m/%d/%Y")) %>% 
-  rename(ORIGINAL_SITE_CODE = revisedOriginalSiteID,
-         SITE_CODE = finalSiteID) %>% 
+  mutate(EVENT_ID = paste(finalSiteID,"_",
+                          format(DATE,'%Y%m%d'),
+                          "T",
+                          stringr::str_replace(eventSMASArrivetime,":",""),
+                          sep = "")) |> 
   distinct() %>% 
-  select(c(SITE_CODE,ORIGINAL_SITE_CODE,EVENT_ID,DATE))
+  select(c(finalSiteID,revisedOriginalSiteID,EVENT_ID,DATE))
 
 #combine 23 and 24
 sites_23_24<-rbind(sites_23,
                    sites_24) %>% 
-  rename(site_id = ORIGINAL_SITE_CODE,
-         final_id = SITE_CODE)# number of rows match here for the rbind
+  rename(site_id = revisedOriginalSiteID,
+         final_id = finalSiteID)# number of rows match here for the rbind
 sites_23_24<-sites_23_24 %>% 
   distinct()
 
@@ -295,6 +297,7 @@ missing_events<-missing_events %>%
 #create the one event ID that I can - the one that has a site that exists already -11-ARCH-1.9
 
 final_metrics_4<-final_metrics_4 %>% 
+  distinct() |> 
   mutate(EVENT_ID = case_when(
     site_id %in% "11-ARCH-1.9"~"11-ARCH-1.9_20230918T1200",
     site_id %in% "10-CHUB-2.2" ~ "10-CHUB-2.2_20230726T1200",
@@ -324,7 +327,7 @@ final_metrics_5<-final_metrics_5 %>%
   distinct()
 
 #write to file
- # write.csv(final_metrics_5,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_metrics_cleaned_preWQMAval.csv")
+# write.csv(final_metrics_5,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_metrics_cleaned_preWQMAval.csv")
 
 
 
@@ -853,6 +856,7 @@ assign_s_biosurvey_parameter_description  <- function(x) {
 }
 
 imported_metrics<-import_s_macro_metrics(data_dir)
+
 prepped_metrics<-prep_s_macro_metrics(imported_metrics, s_event_2023, prepped_sample_table)
 
 #fix the 2 site_id columns by removing one of them
