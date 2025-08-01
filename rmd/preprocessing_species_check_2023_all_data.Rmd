@@ -855,7 +855,9 @@ assign_s_biosurvey_parameter_description  <- function(x) {
   )
 }
 
-imported_metrics<-import_s_macro_metrics(data_dir)
+imported_metrics<-import_s_macro_metrics(data_dir) |> 
+  select(-site_id) |> 
+  rename(site_id = final_id) # we want the corrected site_ids
 
 prepped_metrics<-prep_s_macro_metrics(imported_metrics, s_event_2023, prepped_sample_table)
 
