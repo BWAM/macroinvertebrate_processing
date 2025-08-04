@@ -962,11 +962,11 @@ names(prepped_sample_table2)<-base::toupper(names(prepped_sample_table2))
 
 #adding parameter table columns and missing result table columns
 prepped_metrics3<-prepped_metrics2 %>% 
-  mutate(CASRN = "not_applicable",
-         FRACTION = "not_applicable",
-         MATRIX = "not_applicable",
-         METHOD_SPECIATION = "not_applicable",
-         UNIT = "not_applicable",
+  mutate(#CASRN = "not_applicable", # aeh: don't need these parameter columns, units already exists
+         # FRACTION = "not_applicable",
+         # MATRIX = "not_applicable",
+         # METHOD_SPECIATION = "not_applicable",
+         # UNIT = "not_applicable",
          DETECT_FLAG = "not_applicable",
          DETECTION_LIMIT_UNIT = "not_applicable",
          FINAL_VOLUME_UNIT = "not_applicable",
