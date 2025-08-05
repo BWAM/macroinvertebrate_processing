@@ -299,12 +299,12 @@ missing_events<-missing_events %>%
 final_metrics_4<-final_metrics_4 %>% 
   distinct() |> 
   mutate(EVENT_ID = case_when(
-    site_id %in% "11-ARCH-1.9"~"11-ARCH-1.9_20230918T1200",
+    site_id %in% "11-ARCH-1.9"~"11-ARCH-1.9_20230918T0000",
     site_id %in% "10-CHUB-2.2" ~ "10-CHUB-2.2_20230726T1200",
     site_id %in% "10-SABL-0.4"~ "10-SABL_E-0.4_20230726T1230",
     site_id %in% "13-WAPP_E-3.2" ~ "13-WAPP_E-3.2_20240718T1038",
     site_id %in% "10-JACK-0.2" ~ "10-JKBR-0.2_20230726T1030",
-    site_id %in% "12-SIMB-0.5" ~ "10-SMIB-0.5_20240727T1230",
+    site_id %in% "12-SIMB-0.5" ~ "10-SMIB-0.5_20230727T1230",
     TRUE ~ EVENT_ID
   ),
   final_id = case_when(
@@ -882,13 +882,13 @@ prepped_sample_table %>% skim()
 
 #fix Archer creek AGAIN
 prepped_sample_table<-prepped_sample_table %>% 
-  mutate(site_id = case_when(event_id %in% "11-ARCH-1.9_20230918T1200" ~ "11-ARCH-1.9",
+  mutate(site_id = case_when(event_id %in% "11-ARCH-1.9_20230918T0000" ~ "11-ARCH-1.9",
                              event_id %in% "13-WAPP_E-3.2_20240718T1038" ~ "13-WAPP_E-3.2",
                              event_id %in% "10-JKBR-0.2_20230726T1030" ~ "10-JKBR-0.2",
                              TRUE~site_id))
 
 prepped_metrics<-prepped_metrics %>% 
-  mutate(site_id = case_when(event_id %in% "11-ARCH-1.9_20230918T1200" ~ "11-ARCH-1.9",
+  mutate(site_id = case_when(event_id %in% "11-ARCH-1.9_20230918T0000" ~ "11-ARCH-1.9",
                              event_id %in% "13-WAPP_E-3.2_20240718T1038" ~ "13-WAPP_E-3.2",
                              event_id %in% "10-JKBR-0.2_20230726T1030" ~ "10-JKBR-0.2",
                              TRUE~site_id))
