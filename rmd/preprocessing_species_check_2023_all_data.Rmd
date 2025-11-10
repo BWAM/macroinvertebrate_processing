@@ -327,7 +327,7 @@ final_metrics_5<-final_metrics_5 %>%
   distinct()
 
 #write to file
-# write.csv(final_metrics_5,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_metrics_cleaned_preWQMAval.csv")
+ # write.csv(final_metrics_5,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_metrics_cleaned_preWQMAval.csv")
 
 
 
@@ -359,7 +359,7 @@ final_metrics_5<-final_metrics_5 %>%
 if (nrow(sample_final_2) != nrow(final_metrics_5)) {stop("Number of rows don't match, check the matching")}
 
 #save to file
-  # write.csv(sample_final_2,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_sample_inf_cleaned_preWQMAval.csv")
+ # write.csv(sample_final_2,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_sample_inf_cleaned_preWQMAval.csv")
 ```
 
 
