@@ -4,7 +4,7 @@ waa_data_prep<-function(df){
   library(dplyr)
   
   prepped_df<-df %>% 
-    select(MSSIH_EVENT_SMAS_HISTORY_ID,
+    dplyr::select(MSSIH_EVENT_SMAS_HISTORY_ID,
            MSSIH_BIOSAMPLE_COLLECT_METHOD,
            MSSIH_REPLICATE,
            MSSIH_EVENT_SMAS_SAMPLE_DATE,
@@ -22,7 +22,7 @@ waa_data_prep<-function(df){
                   RIVMILE=`3`)
     
   prepped_df2<-prepped_df2 %>% 
-    mutate(COLL_DATE=MSSIH_EVENT_SMAS_SAMPLE_DATE,
+    dplyr::mutate(COLL_DATE=MSSIH_EVENT_SMAS_SAMPLE_DATE,
          Replicate=MSSIH_REPLICATE,
          MACRO_GENSPECIES=MSDH_GENSPECIES,
          INDIV=MSDH_INDIVIDUAL_SPECIES_CNT,
@@ -316,7 +316,8 @@ metric_table<-function(df){
 
   .GlobalEnv$metrics.subset <- metrics.subset 
   
-  #write them to csv
+  
+#write them to csv
   time=Sys.Date()
   time.t=format(time,"%Y%m%d")
   

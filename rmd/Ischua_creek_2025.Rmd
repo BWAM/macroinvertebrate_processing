@@ -1,0 +1,1099 @@
+---
+title: "macroinvertebrate_processing_2021_in-house-processed"
+author: 'NYSDEC SMAS : Keleigh Reynolds'
+date: "2/3/2021"
+output: html_document
+params:
+  file_name: "Copy of IschuaCreek.csv"
+  user: kareynol
+  file_type: "waa"
+---
+
+```{r include=FALSE,message=FALSE}
+library(skimr)
+library(arrow)
+library(dplyr)
+library(readr)
+
+#file_type options : "waa" or "internal"
+
+#run the functions script - this is a set of functions i wrote for prepping the macro data
+source("functions.R")
+
+```
+
+```{r}
+
+#11/5/2024 reading in everything in the L drive for 2023 and 2024 - which is just DEER river for 2024 and we are still missing 2023 lake data of of 12/4/024
+
+raw<-read.csv(here::here(paste("data",params$file_name,sep = "/")))
+
+
+if(params$file_type=="internal"){m_data_prep(raw)}
+
+if(params$file_type=="waa"){waa_data_prep(raw) #this funtion cleans up the file and gets it ready to be injested into the BAP script
+ prepped_df<-prepped_df3 #renames and copies the df that was made 
+}
+
+
+#11/4/24 check to see why there are less records - Archer creek is teh missing records - these are not ours
+sites.raw<-unique(raw$MSSIH_EVENT_SMAS_HISTORY_ID)
+sites.merged<-unique(prepped_df3$MSSIH_EVENT_SMAS_HISTORY_ID)
+
+setdiff(sites.raw,sites.merged) # Yes confirmed it is Archer Creek, which was renamed WAA provides us this data and i'm not sure why; fixed no remaining differences
+
+
+#species check
+species_check(prepped_df3)
+
+
+```
+
+```{r}
+#prep for tables for Data Mod: this will do the macro species sample event table and the 
+#Sample info history tables, and save it to the outputs folder with today's date. Hashed out for this review
+
+if (params$file_type=="internal"){tables_1_2(prepped_df)}
+if (params$file_type=="waa"){tables_1_2.waa(prepped_df)}
+
+```
+
+```{r}
+#Run BAP and create BAP entry for table
+library(BAP)
+
+saveRDS(bap.prepped,here::here("outputs/bap_prepped.RDS"))
+#looking at zach's
+
+zach<-readRDS(here::here("outputs/bap_prep_zs.RDS"))
+
+#run BAP's data prep on the raw file
+bap.prepped<-BAP::data_prep(prepped_df)
+
+#2022 data fixes, references seemed odd
+bap.prepped$REFERENCE<-""
+bap.prepped<-bap.prepped %>% 
+  distinct()
+
+#split by collection method and run the appropriate BA
+bap.final<-apply_bap(bap.prepped)
+bap.final_zs<-apply_bap(zach)
+
+bap.finalzach<-BAP::bap_riffle(zach)
+
+#this is probably where we can figure out the new code from - start here
+
+#create metric file with correct names
+metrics_final<-metric_table(bap.final)
+
+sites.event<-unique(samp_event$MSSIH_EVENT_SMAS_HISTORY_ID)
+sites.metrics<-unique(metrics.subset$site_id)
+
+setdiff(sites.event,sites.metrics) #this is the low gradient 02-ISCH-15.9
+
+write.csv(bap.final,here::here("outputs/bap_ischua_check_2025.csv"))
+```
+Prep for WQMA
+
+```{r WQMA-data-integration}
+
+#write these to the L drive, hashed out to not overwrite
+#write.csv(metrics.subset, "L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/METRICS_2023_processed_11_5_24_KAR.csv" )
+#write.csv(samp_event,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/MACRO_SAMP_INF_2023_processed_11_5_24_KAR.csv")
+
+#combine deer river and 2023 samples and re-save
+event_2023<-read.csv("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/MACRO_SAMP_INF_2023_processed_11_5_24_KAR.csv")
+event_deer<-read.csv("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/20241007_S_MACRO_SAMP_INF_HIST_deer_river.csv")
+#add missing group column (not used for streams)
+event_deer$MSSIH_GROUP<-""
+
+#bind them
+final_event<-rbind(event_2023,event_deer) #good they match
+final_event$X<-NULL #remove weird column
+
+#write to folder and move the archive that was the originals to another folder (archive)
+#write.csv(final_event,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_sample_inf.csv")
+#i saved these to file just in cae
+
+
+#read in th two metric files
+metrics_2023<-read.csv("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/METRICS_2023_processed_11_5_24_KAR.csv")
+metrics_deer<-read.csv("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/20241007_METRICS_deer_river.csv")
+
+#bind them, these have differing columns bc of hte metric differences; but the amount is fine - 377 of 2023 plus 6 from deer river for 383 total - which is less than the event table since some of them CANT have metrics calculated yet.
+final_metrics<-dplyr::full_join(metrics_2023,metrics_deer)
+
+#join a couple fields to the metrics file 
+cols<-final_event %>% 
+  select(MSSIH_BIOSAMPLE_COLLECT_METHOD,
+         MSSIH_BIOSAMPLE_COLLECT_METHOD_NUM,
+         MSSIH_EVENT_SMAS_HISTORY_ID,
+         MSSIH_EVENT_SMAS_SAMPLE_DATE,
+         MSSIH_REPLICATE,
+         MSSIH_GROUP,
+         MSSIH_LINKED_ID_VALIDATOR) #403 in the original event table, this accounts for the low gradient and the one lake one for 2023 data
+
+setdiff(final_event$MSSIH_EVENT_SMAS_HISTORY_ID,final_metrics$site_id)#403 in the original event table, this accounts for the low gradient and the one lake one for 2023 data
+# "04-LHONYE-0.0" "10-DUTT-0.6"   "10-RILE-0.5"   "10-WOOD-3.8"   "12-NMIL-0.5"   "17-WILT-0.7"  these are the guys
+#rename missing column for join
+final_metrics$MSSIH_LINKED_ID_VALIDATOR<-final_metrics$MMDH_LINKED_ID_VALIDATOR
+
+final_metrics_2<-left_join(final_metrics,cols,
+                           by = "MSSIH_LINKED_ID_VALIDATOR")
+if (nrow(final_metrics_2) != nrow(cols)) {stop("Number of rows don't match, check the matching - it could be low gradient samples or lakes with no metrics")}
+#it didnt this is because of the low gradient as noted above
+
+final_metrics_2$EVENT_ID<-NULL #remove the event id as it's not in the right format - it's the output from the BAP package
+
+#write to folder and move the archive that was the originals to another folder (archive)
+#write.csv(final_metrics_2,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_metrics.csv")
+```
+
+Site corrections from the look-up file from Charlie
+
+```{r site-id-corrections}
+
+#read in the 2023 ones
+sites_survey_23<-readxl::read_excel("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/siteIdCrosswalkTable2023_v3_2025_01_30.xlsx")
+sites_survey_24<-readxl::read_excel("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/siteIdCrosswalkTable2024_v4_2025_01_27.xlsx")
+
+
+sites_23<-sites_survey_23 %>% 
+  select(finalSiteID,revisedOriginalSiteID, eventSMASSampleDate,eventSMASArrivetime,eventSMASId) %>% 
+  mutate(EVENT_ID = eventSMASId,
+         DATE = eventSMASSampleDate) %>% 
+  mutate(DATE = as.Date(DATE, "%m/%d/%y")) %>% 
+  distinct() %>% 
+  select(c(finalSiteID,revisedOriginalSiteID,EVENT_ID,DATE))
+
+sites_24<-sites_survey_24 %>% 
+  select(finalSiteID,revisedOriginalSiteID, eventSMASSampleDate,eventSMASArrivetime) %>% 
+  mutate(DATE = eventSMASSampleDate) %>% 
+  mutate(DATE = as.Date(DATE, "%m/%d/%Y")) %>% 
+  mutate(EVENT_ID = paste(finalSiteID,"_",
+                          format(DATE,'%Y%m%d'),
+                          "T",
+                          stringr::str_replace(eventSMASArrivetime,":",""),
+                          sep = "")) |> 
+  distinct() %>% 
+  select(c(finalSiteID,revisedOriginalSiteID,EVENT_ID,DATE))
+
+#combine 23 and 24
+sites_23_24<-rbind(sites_23,
+                   sites_24) %>% 
+  rename(site_id = revisedOriginalSiteID,
+         final_id = finalSiteID)# number of rows match here for the rbind
+sites_23_24<-sites_23_24 %>% 
+  distinct()
+
+#ok now we'll bind to the final_metrics_2 df before we adjust for WQMA compatability
+
+final_metrics_2$DATE<-as.Date(final_metrics_2$DATE,"%Y-%m-%d")
+
+
+final_metrics_3<-left_join(
+  final_metrics_2,
+  sites_23_24,
+  by = c("site_id","DATE")
+)
+
+#let's look at the ones that didnt join
+missing_events<-final_metrics_3 %>% 
+  subset(is.na(final_id))
+
+
+#site adjustments based on the join - there will likely be some here that do not exist and need to be created
+
+final_metrics_4<-final_metrics_3 %>% #first correct dates that don't match the surveys
+  mutate(site_id = case_when(site_id %in% '11-LHUD-117.1'~'13-LHUD-117.1',
+                             TRUE ~ site_id),
+         new_DATE =
+           case_when(site_id %in% '10-BOQT-28.6' & DATE == "2023-07-27"~"2023-07-26",
+                     site_id %in% "10-GRAV-5.7" & DATE %in% "2023-07-27"~"2023-07-25",
+                     site_id %in% '10-LSAB-17.6' & DATE %in% "2023-07-26"~"2023-07-25",
+                     site_id %in% '10-LSAB-5.7' & DATE %in% "2023-07-26"~"2023-07-25",
+                     #site_id %in% '10-SABL_W-32.1' & DATE %in% "2023-07-20"~"2023-07-26",
+                     site_id %in% '10-SARA-21.8' & DATE %in% "2023-07-26"~"2023-07-25",
+                     site_id %in% '11-UHUD-2.0' & DATE %in% "2023-09-01"~"2023-09-13",
+                     site_id %in% '12-MOHK-65.8' & DATE %in% "2023-09-01"~"2023-09-12",
+                     site_id %in% '12-MOHK-65.8' & DATE %in% "2023-09-14"~"2023-09-12",
+                     site_id %in% '13-LHUD-117.1' & DATE %in% "2023-09-17"~"2023-09-11",
+                     TRUE ~ paste(DATE)
+
+           )) %>%
+  mutate(DATE = as.Date(new_DATE,"%Y-%m-%d"))
+
+
+#check for missing sites again - first remove the old joined columns since they will re-join and mess it up
+final_metrics_4<-final_metrics_4 %>% 
+  select(-c(final_id,EVENT_ID))
+
+final_metrics_4<-left_join(
+  final_metrics_4,
+  sites_23_24,
+  by = c("site_id","DATE")
+)
+
+#let's look at the ones that didnt join
+missing_events<-final_metrics_4 %>% 
+  subset(is.na(final_id))
+
+#make notes for these
+missing_events<-missing_events %>% 
+  mutate(notes = "",
+         missing_survey = "",
+         missing_site = "") %>% 
+  mutate(missing_site = case_when(
+    site_id %in% "10-CADE-6.2"~"T",
+    site_id %in% "10-SABL_W-25.6" ~"F",
+    site_id %in% "10-SMOW-0.1" ~"T", 
+    site_id %in% "11-ARCH-1.9" ~"F", 
+    site_id %in% "11-BORE-13.6" ~"T", 
+    site_id %in% "11-BORE-19.4" ~"T",
+    site_id %in% "11-GULF-0.7" ~"T",
+    site_id %in% "11-JONS-2.1" ~"T",
+    site_id %in% "11-WPBR-0.6" ~"T",
+    site_id %in% "12-SIMB-0.5" ~"T",
+    site_id %in% "13-LHUD-117.1" ~"T",
+    site_id %in% "11-UHUD-42.5" ~ "F",
+    TRUE~"F")) %>% 
+  mutate(missing_survey = case_when(
+      site_id %in% "10-CADE-6.2"~"T",
+    site_id %in% "10-SABL_W-25.6" ~"T",
+    site_id %in% "10-SMOW-0.1" ~"T", 
+    site_id %in% "11-ARCH-1.9" ~"T", 
+    site_id %in% "11-BORE-13.6" ~"T", 
+    site_id %in% "11-BORE-19.4" ~"T",
+    site_id %in% "11-GULF-0.7" ~"T",
+    site_id %in% "11-JONS-2.1" ~"T",
+    site_id %in% "11-WPBR-0.6" ~"T",
+    site_id %in% "12-SIMB-0.5" ~"T",
+    site_id %in% "11-UHUD-42.5" ~ "T",
+    
+    TRUE~"F"
+  )) %>% 
+    mutate(notes = case_when(
+    site_id %in% "10-CADE-6.2"~"Not in site selection template either",
+    site_id %in% "10-SABL_W-25.6" ~"There are 3 potential matches in the survey, 7/26/23 matched fine, but there is another date 7/20 with 2 replicates??",
+    site_id %in% "10-SMOW-0.1" ~"This one is not in teh sites table or the 23 site selection, maybe Tom? ", 
+    site_id %in% "11-ARCH-1.9" ~"Create event id", 
+    site_id %in% "11-BORE-13.6" ~"Not in sites table or 23 site selection", 
+    site_id %in% "11-BORE-19.4" ~"Not in sites table or 23 site selection",
+    site_id %in% "11-GULF-0.7" ~"Not in sites table or 23 site selection",
+    site_id %in% "11-JONS-2.1" ~"Not in sites table or 23 site selection",
+    site_id %in% "11-WPBR-0.6" ~"Not in sites table or 23 site selection",
+    site_id %in% "12-SIMB-0.5" ~"Not in sites table or 23 site selection",
+    site_id %in% "11-UHUD-42.5" ~ "no matching dates for this site",
+    TRUE~"F"))
+
+#checked - these do not exist in the existing survey checks OR the 2023 that are in the database
+#write to .csv for checking, then hashed out to keep from overwriting when checking
+#write.csv(missing_events,here::here("outputs/bap_missing_sites_surveys_12_5_24.csv"))
+
+#create the one event ID that I can - the one that has a site that exists already -11-ARCH-1.9
+
+final_metrics_4<-final_metrics_4 %>% 
+  distinct() |> 
+  mutate(EVENT_ID = case_when(
+    site_id %in% "11-ARCH-1.9"~"11-ARCH-1.9_20230918T1200",
+    site_id %in% "10-CHUB-2.2" ~ "10-CHUB-2.2_20230726T1200",
+    site_id %in% "10-SABL-0.4"~ "10-SABL_E-0.4_20230726T1230",
+    site_id %in% "13-WAPP_E-3.2" ~ "13-WAPP_E-3.2_20240718T1038",
+    site_id %in% "10-JACK-0.2" ~ "10-JKBR-0.2_20230726T1030",
+    site_id %in% "12-SIMB-0.5" ~ "10-SMIB-0.5_20240727T1230",
+    TRUE ~ EVENT_ID
+  ),
+  final_id = case_when(
+    site_id %in% "10-SABL-0.4" ~ "10-SABL_E-0.4",
+    site_id %in% "11-ARCH-1.9" ~ "11-ARCH-1.9",
+    site_id %in% "10-JACK-0.2" ~ "10-JKBR-0.2",
+    site_id %in% "13-WAPP_E-3.2" ~ "13-WAPP_E-3.2",
+    site_id %in% "12-SIMB-0.5" ~ "10-SMIB-0.5",
+    TRUE ~ final_id))
+
+#subset to the complete ones for creating the .RDS files
+final_metrics_5<-final_metrics_4 %>% 
+  filter(!is.na(EVENT_ID)) 
+
+#clean it up
+final_metrics_5<-final_metrics_5 %>% 
+  mutate(MSSIH_EVENT_SMAS_HISTORY_ID = final_id,
+         MSSIH_EVENT_SMAS_SAMPLE_DATE = DATE) %>% #make all the columns agree
+  select(-c(new_DATE,date)) %>% 
+  distinct()
+
+#write to file
+ # write.csv(final_metrics_5,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_metrics_cleaned_preWQMAval.csv")
+
+
+
+```
+
+```{r create-new-sample-final}
+#create new sample file as well
+
+sample_final<-final_metrics_5 %>% 
+  select(c(starts_with("MSSIH_"),EVENT_ID))
+
+#need the counts-so we'll get those from the originally created sample table
+samp_small<-final_event %>% 
+  select(c(MSSIH_LINKED_ID_VALIDATOR, #we cna use the originally created linked validator to join
+           MSSIH_TAXONOMIST,
+           MSSIH_TOTAL_INDIV_CNT,
+           MSSIH_TOTAL_INDIV_CNT_NOTE)) %>% 
+  distinct()
+  
+sample_final_2<-left_join(sample_final,samp_small,
+                          by = "MSSIH_LINKED_ID_VALIDATOR") #total rows match the original
+
+sample_final_2<-sample_final_2 %>% 
+  distinct()
+#create check
+final_metrics_5<-final_metrics_5 %>% 
+  distinct()
+
+if (nrow(sample_final_2) != nrow(final_metrics_5)) {stop("Number of rows don't match, check the matching")}
+
+#save to file
+ # write.csv(sample_final_2,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_sample_inf_cleaned_preWQMAval.csv")
+```
+
+
+Convert data to new format using Zach's code
+https://github.com/BWAM/data_warehouse_prep/blob/main/R/s_macro_metrics.R
+
+
+Prep the macro sample file for the WQMA database
+
+```{r grab-event-table}
+
+#check to see if the sites are already in there
+obt_result_dir <- file.path(
+  "L:",
+  "DOW",
+  "BWAM Share",
+  "data",
+  "parquet",
+  "analytical_table_store",
+  "obt_result.parquet"
+)
+
+#collect unique stream sites/dates
+
+stream_df <- open_dataset(obt_result_dir) |> 
+  filter(WATERBODY_TYPE %in% "river_stream") |>
+  distinct(WATERBODY_TYPE, SITE_CODE) |>
+  collect()
+
+streams_sites<-unique(stream_df$SITE_CODE)
+
+missing_sites<-setdiff(sites.metrics,streams_sites)
+#i think now this part is unecessary since i matched using the surveys above. The surveys will be what Charlie is using to create new sites so that should be all of them. I subsetted the missing events (surveys) into an output folder that we'll work through.
+
+```
+
+This is more functions from the WQMA workup from Zach, i'll leave them in for now, and we can update as needed
+
+```{r}
+correct_site_name <- function(df, vars) {
+  final_df <- df |>
+    dplyr::mutate(
+      dplyr::across(
+        {{vars}},
+        site_corrections
+      ),
+      .before = everything()
+    )
+}
+
+site_corrections <- function(col) {
+  stringr::str_replace_all(
+    col,
+    c("12-SAUQ-2.2" = "12-SAUQ-1.7",
+      "13-LHUD-105" = "13-LHUD-105.0",
+      "14-LBEV-0.1" = "14-LBEV_T03-0.1",
+      "14-LBEV-0.4" = "14-LBEV_T01-0.4",
+      "14-LBEV-0.3" = "14-LBEV_T04-0.3",
+      "11-TWNS-0.2" = "11-STEB-0.2",
+      "11-TWNS-1.1" = "11-STEB-1.1",
+      "06-BIBS-0.3" = "06-JENC-0.3",
+      "06-BIBS-6.6" = "06-JENC-6.6",
+      "12-BATV-11.5" = "12-MITB-0.1",
+      "13-BVRD-0.8" = "13-SHIR-0.8",
+      "13-BVRD-1.0" = "13-SHIR-1.0",
+      "13-BVRD-2.8" = "13-SHIR-2.8",
+      "13-BVRD-4.8" = "13-SHIR-4.8",
+      "05-CAMP- 1.5" = "05-CAMB-1.5",
+      "06-FABS-5.0" = "06-TOLF-1.8",
+      "12-SCHE-0.6" = "12-BRWC-0.6",
+      "12-SCHE-0.8" = "12-COWC-0.8",
+      "05-SEEL-0.5" = "05-MLIC-0.5",
+      "11-SNOK-0.3" = "11-SNOK_L-0.3",
+      "13-TACK-0.1" = "13-SPAR_T10-0.1",
+      "06-CATH_T9_3a-0.5" = "05-CATH_T9_3a-0.5",
+      "07-SKAT_1-0.2" = "07-SKAT_T89-0.2",
+      "07-CAYG_2-1.1" = "07-CAYG-1.1",
+      "07-BSWP_1.3" = "07-BSWP-1.3",
+      "13-LINK-2.3" = "15-LINK-2.3",
+      "07-GROU_1-1.5" = "07-GROU-1.5",
+      "04-BAKE-0.3" = "04-BKER-0.3",
+      "07-BLKC-2.8" = "11-BLKC-2.8",
+      "07-BLCK-2.8" = "11-BLKC-2.8",
+      "07-BUTN-0.6" = "07-BTNC-0.6",
+      "14-COLE-0.4" = "14-CCLV-0.4",
+      "05-CRAN-0.1" = "05-CRBP-0.1",
+      "07-DEAN-1.9" = "07-DNCR-1.9",
+      "07-FISC-1.3" = "07-FSHR-1.3",
+      "10-JACK-0.2" = "10-JKBR-0.2",
+      "08-LIME-6.7" = "08-LMKN-6.7",
+      "13-SILV-4.5" = "13-SILS-4.5",
+      "04-COHO_T41-0.1" = "05-COHO_T41-0.1",
+      "07-SPRN_T7-0.1" = "04-SPRN_T7-0.1",
+      "07-SENP_T32-0.6" = "04-SENP_T32-0.6",
+      "07-MUDG_T72-0.3" = "04-MUDG_T72-0.3",
+      "12-DWAS-7.2" = "11-DWAS-7.2",
+      "04-GRIM-6.3" = "07-GRIM-6.3",
+      "02-JNSN-2.3" = "03-JNSN-2.3",
+      "02-MUDC-0.4" = "03-MUDC-0.4",
+      "04-TNCR-3.7" = "05-TNCR-3.7",
+      "03-WCAN-73.0" = "04-WCAN-73.0",
+      "95-COHO-28.6" = "05-COHO-28.6",
+      "04-SXML-2.2" = "07-SXML-2.2",
+      "12-HVLY-0.5" = "12-HLVY-0.5",
+      "11-UHUD-42.5" = "11-UHUD-43.1",
+      "12-MOHK-3.7" = "12-MOHK-1.5",
+      "05-CHAU-14.9" = "01-CHAU-14.9",
+      "05-TOGA-1.5" = "05-TOGA-1.3",
+      "13-SPAR_T96-01" = "13-SPAR_T9b-0.1",
+      "13-TINW-4.55" = "13-TINW-4.5",
+      "13TINW-4.5" = "13-TINW-4.5",
+      "13TINW-6.5" = "13-TINW-6.5",
+      "15-DEFT_T1-0.5" = "15-DEFT_T1-0.1",
+      "15-DEFT_T1-0.2" = "15-DEFT_T1-0.1",
+      "13-STNY-8.1" = "13-STNY-10.0",
+      "14-GOUL-0.9" = "14-COUL-0.9",
+      "12-NORT-1.7" = "12-NORT-2.3",
+      "05-CHAU-4.2" = "05-CHAU-4.0",
+      "02-CLER_T6-3.1" = "02-TWTY-3.1",
+      "12-STLE-0.8" = "12-STLE-0.2",
+      "13-BRNX-5.6" = "17-BRNX-5.6",
+      "11-LRNC_21-20.2" = "11-UHUD-64.4",
+      "11-UHUD-14.7" = "11-UHUD-14.8",
+      "11-UHUD-27.5" = "11-UHUD-27.4",
+      "11-UHUD-32.1" = "11-UHUD-32.4",
+      "11-UHUD-39.5" = "11-UHUD-40.1",
+      "11-UHUD-39.8" = "11-UHUD-40.3",
+      "11-UHUD-42.5" = "11-UHUD-43.1",
+      "11-UHUD-51.0" = "11-UHUD-51.3",
+      "11-UHUD-64.0" = "11-UHUD-64.2",
+      "11-UHUD-98.3" = "11-UHUD-98.7",
+      "11-UHUD-267.8" = "11-UHUD-106.3",
+      "11-UHUD-273.0" = "11-UHUD-111.6",
+      "11-UHUD-284.9" = "11-UHUD-124.2",
+      "11-UHUD-286.0" = "11-UHUD-124.7",
+      "11-XHR-273.0" = "11-UHUD-111.6",
+      "11-XHR-277.0" = "11-UHUD-115.6",
+      "11-XHR-282.3" = "11-UHUD-120.9",
+      "11-XHR-285.0" = "11-UHUD-124.3",
+      "11-XHR-286.6" = "11-UHUD-125.3",
+      "13-LHUD-25.8" = "13-LHUD-5.7",
+      "13-LHUD-35.0" = "13-LHUD-14.7",
+      "13-LHUD-39.7" = "13-LHUD-19.5",
+      "13-LHUD-50.3" = "13-LHUD-47.5",
+      "13-LHUD-50.59" = "13-LHUD-47.8",
+      "13-LHUD-50.6" = "13-LHUD-47.9",
+      "13-LHUD-50.61" = "13-LHUD-47.9",
+      "13-LHUD-66.3" = "13-LHUD-63.6",
+      "13-LHUD-67.3" = "13-LHUD-64.6",
+      "13-LHUD-89.3" = "13-LHUD-88.7",
+      "13-LHUD-104.6" = "13-LHUD-105",
+      "13-LHUD-119.6" = "13-LHUD-124.9",
+      "13-LHUD-120.2" = "13-LHUD-125.5",
+      "13-LHUD-124.1" = "13-LHUD-128.9",
+      "13-LHUD-125.8" = "13-LHUD-130.6",
+      "13-LHUD-133.4" = "13-LHUD-140.1",
+      "13-LRNC_22-89.3" = "13-LHUD-88.6",
+      "13-LRNC_63-133.4" = "13-LHUD-140.1",
+      "13-LRNC_66-119.6" = "13-LHUD-124.9",
+      "03-YANT_T1C-0.2" = "03-YANT_T1c-0.2",
+      "17-GSCK_TA-0.1" = "17-GSCK_Ta-0.1",
+      "07-SKAT_T93A-0.5" = "07-SKAT_T93a-0.5",
+      "06-SANG_TB-0.1" = "06-SANG_Tb-0.1",
+      "05-CATH_T9_3A-0.5" = "05-CATH_T9_3a-0.5",
+      "07-SKAT_T93A-0.5" = "07-SKAT_T93a-0.5",
+      "14-CALL_E_T13A-0.1" = "14-CALL_E_T13a-0.1",
+      "09-STLW_T46A-0.1" = "09-STLW_T46a-0.1",
+      "07-SKAT_T93A-0.5" = "07-SKAT_T93a-0.5",
+      "12-SCHO_T93_B-1.8" = "12-SCHO_T93_b-1.8",
+      "13-SPAR_T9B-0.1" = "13-SPAR_T9b-0.1",
+      "17-BLND_TB-2.0" = "17-BLND_Tb-2.0",
+      "17-KENF_TA-0.2" = "17-KENF_Ta-0.2",
+      "07-KDIG_TB-0.7" =  "07-KDIG_Tb-0.7",
+      "17-KENF_TA-0.2" = "17-KENF_Ta-0.2",
+      "17-BLND_TB-2.0" = "17-BLND_Tb-2.0",
+      "17-KENF_TA-0.2" = "17-KENF_Ta-0.2",
+      "17-BLND_TB-2.0" = "17-BLND_Tb-2.0",
+      "13-SPAR_T9B-0.1" = "13-SPAR_T9b-0.1",
+      "02-WRGT_TA-1.8" = "02-WRGT_Ta-1.8",
+      "13-LHUD-47.91" = "13-LHUD-47.9",
+      "05-MILD_T7-0.3" = "04-MILD_T7-0.3",
+      "12-SMIB-0.5"= "10-SMIB-0.5"
+      # "11-UHUD-43.1",
+      # "13-PATS-0.5",
+      # "13-PATS-1.3",
+      # "13-PATS-1.8",
+      # "12-SAUQ-1.7",
+      # "12-POEN-2.0",
+    )
+  )
+}
+
+macro_event_corrections <- function(df) {
+  mutate(
+    df,
+    event_id = case_match(
+      event_id,
+      "12-MOYR-5.1_20100729" ~ "12-MOYR-5.1_20100728",
+      "12-OTSO -1.1_20200714" ~ "12-OTSO-1.1_20200714",
+      "01-LBUF-2.5_20200917" ~ "01-LBUF-2.5_20200915",
+      "02-WFREN_T12-0.2_20210915" ~ "02-WFREN_T12-0.5_20210915",
+      "1-BUFF-1.7_20200902" ~ "1-BUFF-1.7_20200901",
+      "01-BUFF-1.7_20200902" ~ "01-BUFF-1.7_20200901",
+      "11-WBLA-0.9_20210803" ~ "11-WBLA-0.9_20210805",
+      "04-UGNS-139.6_20220929" ~ "04-UGNS-139.6_20220921",
+      "05-COHO_T1-0.1_20220830" ~ "05-COHO_T1-0.1_20220831",
+      "05-FIVM-13.0_20220830" ~ "05-FIVM-13.0_20220831",
+      "05-STEO_T22-0.2_20220830" ~ "05-STEO_T22-0.2_20220831",
+      "06-SUSQ-36.9_20220713" ~ "06-SUSQ-36.9_20220712",
+      "08-FALK-0.3_20220914" ~ "08-FALK-0.3_20220915",
+      "08-MILE-0.7_20220914" ~ "08-MILE-0.7_20220915",
+      "08-TANE-0.7_20220913" ~ "08-TANE-0.7_20220914",
+      "13-SPAR-3.6_20220714" ~ "13-SPAR-3.6_20220719",
+      "12-SPIT-2.3_20210723" ~ "12-SPIT-2.3_20200723",
+      "12-WESK-0.1_20200716" ~ "12-WESK_T5-0.1_20200716",
+      "07-CANO-2.3_20210721" ~ "07-CANO-0.8_20210721",
+      "07-DEAN-0.1_20210721" ~ "07-DEAN-1.9_20210721",
+      "13-ESOP-4.4_20220720" ~ "13-ESOP-4.8_20220720",
+      # "13-POST-0.8_20220719" ~ "13-POST-18.4_20220719",
+      # "13-ROND-9.2_20220719" ~ "13-ROND-32.2_20220719",
+      "13-TIOR-0.2_20220720" ~ "13-TIOR-0.1_20220720",
+      "07-FISC-0.1_20210722" ~ "07-FISC-1.3_20210722",
+      "07-POTT-0.7_20210831" ~ "07-POTT-0.1_20210831",
+      "07-RHCR-0.8_20210713" ~ "07-RHCR-0.7_20210713",
+      "07-RHCR-0.8_20210901" ~ "07-RHCR-0.7_20210901",
+      "11-UHUD-125.3_20210803" ~ "11-UHUD-124.7_20210803",
+      "01-CHAU-4.2_20220922" ~ "01-CHAU-4.0_20220922",
+      "05-CDEA-11.4_20220831" ~ "05-CDEA-11.5_20220831",
+      "05-CHEM-33.8_20220830" ~ "05-CHEM-33.6_20220830",
+      "05-COHO-1.4_20220830" ~ "05-COHO-1.5_20220830",
+      "05-PURD-0.1_20220831" ~ "05-PURD-0.2_20220831",
+      # "05-TRPS-9.5_20220901" ~ "05-TRPS-7.0_20220901",
+      "08-BLCK-30.0_20220802" ~ "08-BLCK-30.4_20220802",
+      "08-LIME-6.3_20220914" ~ "08-LIME-6.7_20220914",
+      "08-WHET-4.8_20220914" ~ "08-WHET-4.9_20220914",
+      "11-XHR-296.0_20210803" ~ "11-UHUD-296.7_20210803",
+      "05-MDCR-10.0_20220821" ~ "05-MDCR-10.0_20220831",
+      "05-MEAD-10.8_20220831" ~ "05-MEAD-10.9_20220830",
+      "07-VENS-1.8_20210722" ~ "07-VENE-1.5_20210722",
+      "03-LSTN-1.0_20200801" ~ "03-LSTN-1.0_20200819",
+      "08-ADKS_36-0.5_20220914" ~ "08-ADKS_36-0.6_20220914",
+      "08-BLCK_T132-2.0_20220915" ~ "08-BLCK_T132-1.8_20220915",
+      "09-BRND-2.5_20210728" ~ "09-BRND-1.6_20210728",
+      "09-COLE-2.9_20210727" ~ "09-COLE-3.6_20210727",
+      "09-COLE-4.6_20210727" ~ "09-COLE-4.2_20210727",
+      "12-FOX-1.1_20220809" ~ "12-FOX-1.1_20220810",
+      "13-LHUD_T299-2.5_20220720" ~ "13-LHUD_T229-2.5_20220720",
+      "13-WFKIL-0.1_20220721" ~ "13-WFKIL-0.4_20220721",
+      "16-SUSQ-25.2_20220712" ~ "06-SUSQ-25.2_20220712",
+      "10-JACK-0.2_20230726T1030" ~ "10-JKBR-0.2_20230726T1030",# fixing the site that doesn't match - same name as another waterbody 
+      .default = event_id
+    )
+  ) 
+}
+
+```
+
+
+Read in my prepped files and adjust the sample table with Zach's code
+
+```{r}
+
+
+data_dir<-"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores"
+
+standard_read_csv <- function(file, col_types = NULL) {
+  readr::read_csv(
+    file = file,
+    col_types = col_types,
+    na = c("", "NA", "N/A", "n/a", "-9999")
+  )
+}
+
+import_s_macro_sample <- function(data_dir) {
+  standard_read_csv(
+    file = file.path(data_dir,
+                     "2023_all_2024_deer_river_sample_inf_cleaned_preWQMAval.csv"),
+    col_types = cols(
+      MSSIH_EVENT_SMAS_HISTORY_ID = col_character(),
+      MSSIH_EVENT_SMAS_SAMPLE_DATE = col_date(format = "%Y-%m-%d"), #updated the date format here
+      MSSIH_REPLICATE = col_character(),
+      MSSIH_TAXONOMIST = col_character(),
+      MSSIH_BIOSAMPLE_COLLECT_METHOD = col_character(),
+      MSSIH_TOTAL_INDIV_CNT = col_double(),
+      MSSIH_GROUP = col_character(),
+      EVENT_ID = col_character() #KAR addition since i made these already and we dont have time on the macros
+    )
+  )
+}
+
+prep_s_macro_sample <- function(x, s_event) {
+  x |> 
+    distinct(
+      site_id = MSSIH_EVENT_SMAS_HISTORY_ID,
+      sample_date = MSSIH_EVENT_SMAS_SAMPLE_DATE,
+      replicate = MSSIH_REPLICATE,
+      taxonomist = MSSIH_TAXONOMIST,
+      collection_method = MSSIH_BIOSAMPLE_COLLECT_METHOD,
+      total_individual_count = MSSIH_TOTAL_INDIV_CNT,
+      sample_group = MSSIH_GROUP,
+      event_id = EVENT_ID
+    ) |> 
+    mutate(sample_date = format(sample_date, "%Y%m%d"))|> 
+    mutate(sample_group = case_when(
+      grepl("[a-zA-Z]", replicate) ~ glue::glue("{sample_group}_{replicate}"),
+      .default = sample_group
+    ),
+    replicate = as.numeric(stringr::str_remove_all(replicate,
+                                                   "[a-zA-Z]"))
+    ) |> 
+    #kar hashed out since we're missing the time
+    # tidyr::unite(
+    #   "event_id",
+    #   site_id,
+    #   sample_date
+    # ) |> 
+    macro_event_corrections() |> 
+    correct_site_name(
+      vars = "event_id"
+     ) 
+  #|> 
+    # semi_join(s_event,
+    #           by = "event_id")
+ 
+  
+}
+
+#run the functions
+imported_sample<-import_s_macro_sample(data_dir)
+prepped_sample_table<-prep_s_macro_sample(imported_sample,s_event = s_event_2023) 
+
+setdiff(prepped_sample_table$event_id, imported_sample$EVENT_ID) 
+imported_sample_check<-imported_sample %>% 
+  mutate(check = paste(MSSIH_EVENT_SMAS_HISTORY_ID,MSSIH_REPLICATE)) %>% 
+  select(check,MSSIH_EVENT_SMAS_HISTORY_ID)
+
+prepped_sample_table_check<-prepped_sample_table %>% 
+  mutate(check = paste(site_id,replicate)) %>% 
+  select(check)
+
+setdiff(prepped_sample_table_check$check, imported_sample_check$check)
+
+check<-left_join(imported_sample_check, prepped_sample_table_check)
+
+
+
+```
+
+
+Then prep the metrics file using Zach's code
+
+```{r}
+
+import_s_macro_metrics <- function(data_dir) {
+  standard_read_csv(
+    file = file.path(data_dir,
+                     "2023_all_2024_deer_river_metrics_cleaned_preWQMAval.csv"),
+           col_types = cols(
+             MMDH_RICHNESS = col_double(),
+             MMDH_RICHNESS_SCORE = col_double(),
+             MMDH_EPT_RICH = col_double(),
+             MMDH_EPT_SCORE = col_double(),
+             MMDH_HBI_INDEX = col_double(),
+             MMDH_HBI_SCORE = col_double(),
+             MMDH_SHANNON = col_double(),
+             MMDH_SHANNON_SCORE = col_double(),
+             MMDH_BIO_ASMT_PROFILE_SCORE = col_double(),
+             MMDH_PCT_MODEL_AFFINITY = col_double(),
+             MMDH_PCT_MODEL_AFFINITY_SCORE = col_double(),
+             MMDH_NUTRIENT_BIOTIC_INDEX_P = col_double(),
+             MMDH_NBI_P_SCORE = col_double(),
+             MMDH_NCO_RICH = col_double(),
+             MMDH_NCO_RICH_SCORE = col_double(),
+             MMDH_PCT_DOMINANCE_3 = col_double(),
+             MMDH_PCT_DOMINANCE_3_SCORE = col_double(),
+             MSSIH_BIOSAMPLE_COLLECT_METHOD = col_character(),
+             MSSIH_BIOSAMPLE_COLLECT_METHOD_NUM = col_double(),
+             MSSIH_EVENT_SMAS_HISTORY_ID = col_character(),
+             MSSIH_EVENT_SMAS_SAMPLE_DATE = col_date(format = "%Y-%m-%d"), #updated by KAR
+             MSSIH_REPLICATE = col_double(),
+             MSSIH_GROUP = col_character(),
+             EVENT_ID = col_character()
+           ))
+}
+
+prep_s_macro_metrics <- function(x, s_event, s_macro_sample) {
+  S_MACRO_METRICS_final <- x |> 
+    distinct(
+      #kar updates
+      site_id = site_id,
+      date = MSSIH_EVENT_SMAS_SAMPLE_DATE,
+      collection_method = MSSIH_BIOSAMPLE_COLLECT_METHOD,
+      replicate = MSSIH_REPLICATE,
+      sample_group = MSSIH_GROUP,
+      score_bioassessment_profile = MMDH_BIO_ASMT_PROFILE_SCORE,
+      raw_richness = MMDH_RICHNESS,
+      score_richness = MMDH_RICHNESS_SCORE,
+      raw_ept_richness = MMDH_EPT_RICH,
+      score_ept_richness = MMDH_EPT_SCORE,
+      raw_hilsenhoff_biotic_index = MMDH_HBI_INDEX,
+      score_hilsenhoff_biotic_index = MMDH_HBI_SCORE,
+      raw_shannon_diversity = MMDH_SHANNON,
+      score_shannon_diversity = MMDH_SHANNON_SCORE,
+      raw_percent_model_affinity = MMDH_PCT_MODEL_AFFINITY,
+      score_percent_model_affinity = MMDH_PCT_MODEL_AFFINITY_SCORE,
+      raw_nutrient_biotic_index_phosphorus = MMDH_NUTRIENT_BIOTIC_INDEX_P,
+      score_nutrient_biotic_index_phosphorus = MMDH_NBI_P_SCORE,
+      raw_non_chiro_oligo_richness = MMDH_NCO_RICH,
+      score_non_chiro_oligo_richness = MMDH_NCO_RICH_SCORE,
+      event_id = EVENT_ID
+     # raw_percent_dominance_3 = MMDH_PCT_DOMINANCE_3,
+      #score_percent_dominance_3 = MMDH_PCT_DOMINANCE_3_SCORE # dont have these in the file so i have to hash them out - these are sandy i think?
+    ) |> 
+    mutate(date = format(date, "%Y%m%d")) |> 
+    # tidyr::unite(
+    #   "event_id",
+    #   site_id,
+    #   date
+    # ) |> #kar hashed out since i created these already
+    mutate(
+      collection_method = case_match(
+        collection_method,
+        "Sediment_Ponar" ~ "Sediment Ponar",
+        .default = collection_method
+      )
+    ) |> 
+    macro_event_corrections() |> 
+    correct_site_name(
+      vars = "event_id"
+    ) |> 
+    # semi_join(s_event,
+    #           by = "event_id") |> #updated by KAR, since we dont have the times
+    left_join(
+      s_macro_sample,
+      by = join_by(event_id, collection_method, replicate, sample_group)
+    ) |> 
+    select(-taxonomist) |> 
+    distinct() |> 
+    tidyr::pivot_longer(
+      cols = c(score_bioassessment_profile:score_non_chiro_oligo_richness,total_individual_count),
+      names_to = "metric_name",
+      values_to = "metric_value",
+      values_drop_na = TRUE
+    ) |> 
+    mutate(
+      metric_type = case_when(
+        grepl("raw", metric_name) ~ "raw",
+        grepl("score", metric_name) ~ "score",
+        grepl("total_individual_count", metric_name) ~ "raw",
+        .default = NA_character_
+      ),
+      metric_name = stringr::str_remove_all(
+        metric_name,
+        pattern = "raw_|score_"
+      )
+    )
+  
+  S_MACRO_METRICS_standard <- S_MACRO_METRICS_final |> 
+    rename(parameter_name = metric_name,
+           result_value = metric_value,
+           unit = metric_type) |> 
+    select(-sample_group) |> 
+    mutate(activity_type = "macroinvertebrate_metrics",
+           sample_type = "calculated",
+           sample_source = "bap_r_package",
+           sampling_location = "unknown",
+           lab_name = "not_applicable",
+           organization_name = "NYSDEC",
+           unit = stringr::str_replace_all(unit, "score", "score_0-10"),
+           replicate = as.character(replicate),
+           parameter_description = assign_s_biosurvey_parameter_description(
+             x = parameter_name
+           )
+    )
+  
+ 
+}
+
+assign_s_biosurvey_parameter_description  <- function(x) {
+  dplyr::case_match(
+    x,
+    "bioassessment_profile" ~ "The Biological Assessment Profile (BAP) of index values is a method of plotting individual biological comunity metrics on a common scale of water quality impact. Individual metrics from those described previously are converted to a common 10-scale based on a series of equations. The combination of metrics used differs based on the type of sample collected and the habitat from which the sample was taken. The mean scale value of the indices represents the assessed impact for each site",
+    "richness" ~ "This is the total number of species or taxa found in the sample. Higher species richness values are mostly associated with clean-water conditions.",
+    "ept_richness" ~ "EPT denotes the total number of species of mayflies (Ephemeroptera), stoneflies (Plecoptera), and caddisflies (Trichoptera) found in a subsample. These are considered to be mostly clean-water organisms in flowing waters, and their presence generally is correlated with good water quality.",
+    "hilsenhoff_biotic_index" ~ "The Hilsenhoff Biotic Index is calculated by multiplying the number of individuals of each species by its assigned tolerance value, summing these products, and dividing by the total number of individuals. On a 0-10 scale, tolerance values range from intolerant (0) to tolerant (10). Toleracane values are mostly from Hilsenhoff (1987), but some have been recalibarated based on NYS datasets. High HBI values are indictive of organic (sewage) pollution, while low values indicate lack of sewage effects.",
+    "shannon_diversity" ~ "Species diversity is a value that combines species richness and community balance (evenness). Shannon-Wiener diversity values are calculated using the formula in Weber (1973). High species diversity values usually indicate diverse, well-balanced communities, while low values indicate stress or impact.",
+    "total_individual_count" ~ "The total number of individuals enumerated. Multiplate samples represent density estimates.",
+    "percent_model_affinity" ~ "The Percent Model Affinity for taxonomic group composition is a measure of similarity to a model non-impacted community based on percent abundance in 7 major groups (Novak and Bode, 1992). Percentage similarity as calculated in Washington (1987) is used to measure similarity. Models are descriped in SOP 216.",
+    "nutrient_biotic_index_phosphorus" ~ "The Nutrient Biotic Index (Smith et al., 2007) is a diagnostic measure of stream nutrient enrichment identified by macroinvertebrate taxa. The frequency of occurrences of taxa at varying nutrient concentrations allowed the identification of taxon-specific nutrient optima using a method of weighted averaging. The assignment of tolerance values to taxa based on their nutrient optimum provided the ability to reduce macroinvertebrate community data to a linear scale of eutrophication from oligotrophic to eutrophic. Two tolerance values were assigned to each taxon, one for total phosphorus, and one for nitrate. This provides the ability to calculate two different nutrient biotic indices, one for total phosphorus (NBI-P), and one for nitrate (NBI-N). Study of the indices indicate better performance by the NBI-P, with strong correlations to stream nutrient concentrations and diatom communities.",
+    "non_chiro_oligo_richness" ~ "Non-Chironomidae and Oligochaeta (NCO) Richness denotes the total number of species of organisms other than those in the groups Chironomidae and Oligochaeta. Since Chironomidae and Oligochaeta are generally the most abundant groups in impacted communities, NCO taxa are considered to be less pollution tolerant, and their presence would be expected to be more indicative of good water quality. This measure is the Sandy Stream counterpart of EPT richness.",
+    "percent_dominance_3" ~ "Dominance is a measure of community balance, or evenness of the distribution of individuals among the species. Simple dominance is the percent contribution of the most numerous species. Dominance-3 (rivers and streams) is the combined percent contribution of the three most numerous taxa.",
+    .default = NA_character_
+  )
+}
+
+imported_metrics<-import_s_macro_metrics(data_dir)
+
+prepped_metrics<-prep_s_macro_metrics(imported_metrics, s_event_2023, prepped_sample_table)
+
+#fix the 2 site_id columns by removing one of them
+prepped_metrics<-prepped_metrics %>% 
+  select(-c(site_id.y)) %>% 
+  rename(site_id = site_id.x)
+
+# New names:Warning: The following named parsers don't match the column names: MMDH_PCT_DOMINANCE_3, MMDH_PCT_DOMINANCE_3_SCORE - this is the warning we get, this is because i dont have any metrics that use those columns in this batch.
+
+```
+
+```{r final-checks}
+#check to make sure that there are matches
+
+setdiff(prepped_metrics$event_id,prepped_sample_table$event_id)
+setdiff(prepped_sample_table$event_id, prepped_metrics$event_id)
+#these are good
+
+prepped_metrics %>% skim()
+prepped_sample_table %>% skim()
+
+#fix Archer creek AGAIN
+prepped_sample_table<-prepped_sample_table %>% 
+  mutate(site_id = case_when(event_id %in% "11-ARCH-1.9_20230918T1200" ~ "11-ARCH-1.9",
+                             event_id %in% "13-WAPP_E-3.2_20240718T1038" ~ "13-WAPP_E-3.2",
+                             event_id %in% "10-JKBR-0.2_20230726T1030" ~ "10-JKBR-0.2",
+                             TRUE~site_id))
+
+prepped_metrics<-prepped_metrics %>% 
+  mutate(site_id = case_when(event_id %in% "11-ARCH-1.9_20230918T1200" ~ "11-ARCH-1.9",
+                             event_id %in% "13-WAPP_E-3.2_20240718T1038" ~ "13-WAPP_E-3.2",
+                             event_id %in% "10-JKBR-0.2_20230726T1030" ~ "10-JKBR-0.2",
+                             TRUE~site_id))
+  
+
+```
+
+
+
+```{r}
+#check metrics fall within specified range
+check<-prepped_metrics %>% 
+  filter(parameter_name %in% "bioassessment_profile")
+range(check$result_value)  #looks good, should be between 1-10
+
+prepped_metrics2<-prepped_metrics %>% 
+  mutate(result_category = case_when(
+    parameter_name %in% "bioassessment_profile" & result_value < 2.5 ~ "severly_impacted",
+    parameter_name %in% "bioassessment_profile" & between(result_value, 2.5,5.0) ~ "moderately_impacted", 
+    parameter_name %in% "bioassessment_profile" & between(result_value, 5.0,7.5) ~ "slightly_impacted", 
+    parameter_name %in% "bioassessment_profile" & result_value > 7.5 ~ "non_impacted", 
+    TRUE ~ ""
+  )) #use event id to determine the flags
+
+#flags for < total amount
+event_ids_tc<-prepped_metrics2 %>% 
+  filter(parameter_name %in% "total_individual_count") %>% 
+  mutate(result_qualifier = case_when(collection_method %in% 
+                                 (collection_method %in% "Kick: Standard" & result_value < 100) ~ "<tc",
+                                 (collection_method %in% "Kick: Sandy Stream" & result_value < 100) ~ "<tc",
+                                 (collection_method %in% "Multiplate: Navigable" & result_value < 250) ~ "<tc",
+                                 (collection_method %in% "Multiplate: Non-Navigable" & result_value < 250) ~ "<tc",
+                                 (collection_method %in% "Low Gradient" & result_value < 200) ~ "<tc",
+                                 (collection_method %in% "Lake Composite" & result_value < 300) ~ "<tc",
+                                 TRUE ~ ""
+                                 )) %>% 
+filter(result_qualifier %in% "<tc" )
+#subset the event ids that will need the <tc for the final bap score 
+event_ids_tc.l<-unique(event_ids_tc$event_id)
+
+prepped_metrics2<-prepped_metrics2 %>% 
+  mutate(result_qualifier = case_when(
+    event_id %in% event_ids_tc.l ~ "<tc",
+    TRUE ~ ""
+  ),
+  result_qualifier_description = case_when(
+    (event_id %in% event_ids_tc.l & parameter_name %in% "bioassessment_profile")~ "total macroinvertebrate count not met for method in SOP 214, Biological Enumeration",
+    TRUE ~ ""
+  ))
+  
+#I was going to update the collection method - but htat looks like it's part of hte sample table, so i will do it here and not in the results table
+prepped_sample_table2<-prepped_sample_table %>% 
+  mutate(sample_method = case_when(
+    collection_method %in% "Kick: Standard" ~ "kick_standard",
+    collection_method %in% "Multiplate: Navigable" ~ "multiplate_navigable",
+    collection_method %in% "Multiplate: Non-Navigable" ~ "multiplate_non-navigable",
+    collection_method %in% "Sediment Ponar" ~ "sediment_ponar",
+    collection_method %in% "Kick: Sandy Stream" ~ "kick_sandy-stream",
+    collection_method %in% "Kick: Headwater Stream" ~ "kick_standard",
+    collection_method %in% "Multihabitat: Lake" ~ "multihabitat_lake",
+    collection_method %in% "Low-Gradient" ~ "low_gradient",
+    collection_method %in% "Lake: Ponar" ~ "lake_ponar",
+    collection_method %in% "Lake: Littoral" ~ "lake_littoral",
+    collection_method %in% "Other: Various (Historical)" ~ "other_various-historical",
+   TRUE ~ "unknown"
+  ))
+
+#make all column names capital
+names(prepped_metrics2) <- base::toupper(names(prepped_metrics2))
+names(prepped_sample_table2)<-base::toupper(names(prepped_sample_table2))
+
+#adding parameter table columns and missing result table columns
+prepped_metrics3<-prepped_metrics2 %>% 
+  mutate(CASRN = "not_applicable",
+         FRACTION = "not_applicable",
+         MATRIX = "not_applicable",
+         METHOD_SPECIATION = "not_applicable",
+         UNIT = "not_applicable",
+         DETECT_FLAG = "not_applicable",
+         DETECTION_LIMIT_UNIT = "not_applicable",
+         FINAL_VOLUME_UNIT = "not_applicable",
+         LAB_ANALYTICAL_METHOD = "not_applicable",
+         ANALYSIS_DATETIME = as.POSIXct(NA),
+         DILUTION_FACTOR = as.numeric(NA),
+         FINAL_VOLUME = as.numeric(NA),
+         FINAL_VOLUME_UNIT = "not_applicable",
+         LAB_ANALYTICAL_METHOD = "not_applicable",
+         LAB_QUALIFIER = "",
+         LAB_SAMPLE_ID = "not_applicable",
+         LAB_VALIDATION_LEVEL = "",
+         METHOD_DETECTION_LIMIT = as.numeric(NA),
+         PREP_DATETIME = as.POSIXct(NA),
+         PREP_METHOD = "not_applicable",
+         QUALIFIER_SOURCE = "not_applicable",
+         QUANTITATION_LIMIT = as.numeric(NA),
+         REPORTABLE_RESULT = "not_applicable",
+         REPORTING_DETECTION_LIMIT = as.numeric(NA),
+         RESULT_COMMENT = "none",
+         RESULT_QUALIFIER_NOTE = "not_applicable",
+         RESULT_TYPE_CODE = "not_applicable",
+         SUBSAMPLE_AMOUNT = as.numeric(NA),
+         SUBSAMPLE_AMOUNT_UNIT = "not_applicable",
+         TEST_TYPE = "not_applicable") %>% 
+    mutate(SAMPLE_METHOD = case_when(
+    COLLECTION_METHOD %in% "Kick: Standard" ~ "kick_standard",
+    COLLECTION_METHOD %in% "Multiplate: Navigable" ~ "multiplate_navigable",
+    COLLECTION_METHOD %in% "Multiplate: Non-Navigable" ~ "multiplate_non-navigable",
+    COLLECTION_METHOD %in% "Sediment Ponar" ~ "sediment_ponar",
+    COLLECTION_METHOD %in% "Kick: Sandy Stream" ~ "kick_sandy-stream",
+    COLLECTION_METHOD %in% "Kick: Headwater Stream" ~ "kick_standard",
+    COLLECTION_METHOD %in% "Multihabitat: Lake" ~ "multihabitat_lake",
+    COLLECTION_METHOD %in% "Low-Gradient" ~ "low_gradient",
+    COLLECTION_METHOD %in% "Lake: Ponar" ~ "lake_ponar",
+    COLLECTION_METHOD %in% "Lake: Littoral" ~ "lake_littoral",
+    COLLECTION_METHOD %in% "Other: Various (Historical)" ~ "other_various-historical",
+   TRUE ~ "unknown"
+  )) %>%
+  #adding the missing sample columns, first change the name and then get the rest
+rename(SAMPLE_LOCATION = SAMPLING_LOCATION,
+       SAMPLE_ORGANIZATION = ORGANIZATION_NAME) %>% 
+  mutate(
+    SAMPLE_DELIVERY_GROUP = "not_applicable",
+    SAMPLE_DEPTH_METERS = as.numeric(NA),
+    SAMPLE_LATITUDE = as.numeric(NA),
+    SAMPLE_LONGITUDE = as.numeric(NA),
+    SAMPLE_NAME = "unknown",
+    SAMPLE_METHOD_REFERENCE = "SOP#216",
+    SAMPLE_METHOD_DESCRIPTION = "kick_net",
+    SAMPLE_LAB = "WAA",
+    SAMPLE_COMMENT = "none") %>% 
+  select(-c(COLLECTION_METHOD))
+
+
+```
+
+
+```{r check the columns}
+#frist read in a small result from the results table
+build_dir <- file.path(
+  "L:",
+  "DOW",
+  "BWAM Share",
+  "data",
+  "parquet",
+  "build_tables")
+
+result_df <- arrow::open_dataset(sources = file.path(build_dir, "RESULT.parquet")) |> 
+  filter(LAB_SAMPLE_ID %in% "R1202229-011") %>% #trying to limit it so the collection isnt crazy
+  distinct() %>% 
+  collect()
+
+check<-janitor::compare_df_cols(result_df, 
+                         prepped_metrics3, 
+                         return = "mismatch")
+
+#wow idk why i thought there would definitely be differences...nice job!
+
+#same for the sample table
+
+sample_df <- arrow::open_dataset(sources = file.path(build_dir, "SAMPLE.parquet")) |> 
+  filter(SAMPLE_DELIVERY_GROUP %in% "R1603723") %>% #trying to limit it so the collection isnt crazy
+  distinct() %>% 
+  collect()
+
+check<-janitor::compare_df_cols(sample_df, 
+                         prepped_sample_table2, 
+                         return = "mismatch")
+
+prepped_sample_table2<-prepped_sample_table2 %>% 
+  mutate(REPLICATE = as.character(REPLICATE))
+
+check<-janitor::compare_df_cols(sample_df, 
+                         prepped_sample_table2, 
+                         return = "mismatch")
+#these look good
+
+```
+
+
+Write to the staging area
+
+```{r update-flags-and-description}
+
+
+saveRDS(
+  object = prepped_metrics3,
+  file = file.path(
+    "L:",
+    "DOW",
+    "BWAM Share",
+    "data",
+    "data_warehouse_staging",
+    "2024_V3",
+    "raw_data",
+    "bap_metrics.rds"
+  )
+)
+
+saveRDS(
+  object = prepped_sample_table2,
+  file = file.path(
+    "L:",
+    "DOW",
+    "BWAM Share",
+    "data",
+    "data_warehouse_staging",
+    "2024_V3",
+    "raw_data",
+    "bap_sample_table.rds"
+  )
+)
+
+```
+
