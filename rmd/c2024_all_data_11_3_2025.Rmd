@@ -829,7 +829,7 @@ prepped_metrics2<-prepped_metrics2 %>%
   ))
   
 #I was going to update the collection method - but htat looks like it's part of hte sample table, so i will do it here and not in the results table
-prepped_sample_table2<-prepped_sample_table %>% 
+prepped_sample_table2<-prepped_sample_table |> 
   mutate(sample_method = case_when(
     collection_method %in% "Kick: Standard" ~ "kick_standard",
     collection_method %in% "Multiplate: Navigable" ~ "multiplate_navigable",
@@ -846,6 +846,7 @@ prepped_sample_table2<-prepped_sample_table %>%
     collection_method %in% "Other: Various (Historical)" ~ "other_various-historical",
    TRUE ~ "unknown"
   ))
+
 
 #make all column names capital
 names(prepped_metrics2) <- base::toupper(names(prepped_metrics2))
@@ -867,9 +868,9 @@ prepped_metrics3<-prepped_metrics2 %>%
          FINAL_VOLUME = as.numeric(NA),
          FINAL_VOLUME_UNIT = "not_applicable",
          LAB_ANALYTICAL_METHOD = "not_applicable",
-         LAB_QUALIFIER = "",
+         LAB_QUALIFIER = "0",
          LAB_SAMPLE_ID = "not_applicable",
-         LAB_VALIDATION_LEVEL = "",
+         LAB_VALIDATION_LEVEL = "not_applicable",
          METHOD_DETECTION_LIMIT = as.numeric(NA),
          PREP_DATETIME = as.POSIXct(NA),
          PREP_METHOD = "not_applicable",
@@ -896,10 +897,10 @@ prepped_metrics3<-prepped_metrics2 %>%
     COLLECTION_METHOD %in% "Lake: Littoral" ~ "lake_littoral",
     COLLECTION_METHOD %in% "Other: Various (Historical)" ~ "other_various-historical",
    TRUE ~ "unknown"
-  )) %>%
+  )) |> 
   #adding the missing sample columns, first change the name and then get the rest
 rename(SAMPLE_LOCATION = SAMPLING_LOCATION,
-       SAMPLE_ORGANIZATION = ORGANIZATION_NAME) %>% 
+       SAMPLE_ORGANIZATION = ORGANIZATION_NAME) |> 
   mutate(
     SAMPLE_DELIVERY_GROUP = "not_applicable",
     SAMPLE_DEPTH_METERS = as.numeric(NA),
@@ -908,10 +909,10 @@ rename(SAMPLE_LOCATION = SAMPLING_LOCATION,
     SAMPLE_NAME = "unknown",
     SAMPLE_METHOD_REFERENCE = "SOP#216",
     SAMPLE_METHOD_DESCRIPTION = "kick_net",
-    SAMPLE_LAB = "WAA",
-    SAMPLE_COMMENT = "none") %>% 
+    SAMPLE_LAB = "Watershed Assessment Associates (WAA)",
+    SAMPLE_COMMENT = "none", 
+    SAMPLE_TYPE = "macroinvertebrate_metrics")|> 
   select(-c(COLLECTION_METHOD))
-
 
 ```
 
@@ -969,14 +970,75 @@ prepped_sample_table2<-prepped_sample_table2 |>
   mutate(SAMPLE_METHOD = case_when(
     (SITE_ID %in% RMN$MSSIH_EVENT_SMAS_HISTORY_ID & REPLICATE == 2) ~ "rmn_kick",
     TRUE~SAMPLE_METHOD))
-  
 
 ```
+
+```{r validation}
+# Setup -------------------------------------------------------------------
+# Install the BWAM_ETL package to gain access to functions for table splitting and validation.
+# install.packages("pak")
+ pak::pak("BWAM/BWAM_ETL")
+library("BWAM.ETL")
+library(purrr)
+
+# Read in or Prep your OBT ------------------------------------------------
+# Example OBT to be replaced with your own OBT data frame.
+obt_df <- prepped_metrics3
+obt_df$SAMPLE_CREW<-""
+
+# Split the OBT into the target tables ------------------------------------
+# Vector of target tables
+table_vec <- c("RESULT", "SAMPLE")
+
+prep_list <- table_vec |>
+  purrr::set_names() |>
+  # prep_wqma_table
+  purrr::map( ~ prep_wqma_table(
+    df = obt_df,
+    target_table_name = .x,
+    add_uid_md5 = FALSE
+  ))
+
+# Example of how to extract a list element.
+t1 <- prep_list$RESULT
+
+# Run the validation for each target table --------------------------------
+val_list <- table_vec |>
+  purrr::set_names() |>
+  purrr::map(~ validate(
+    df = prep_list[[.x]],
+    table_name = .x,
+    return_report = TRUE
+  ))
+
+# Example of how to check validation.
+# In this example, you can see (89-91) the columns SUBSAMPLE_AMOUNT, ANALYSIS_DATETIME, and PREP_DATETIME
+# are not the expected column type (e.g., numeric, posix, etc.)
+val_list$RESULT
+val_list$SAMPLE
+
+# Get just the failed validation checks
+fail_list <- table_vec |>
+  purrr::set_names() |>
+  purrr::map( ~ pointblank::get_agent_report(agent = val_list[[.x]],
+                                             keep = "fail_states"))
+# This will print out n amount of reports, where n = length(table_vec)
+# You can use the arrows at the top left of the RStudio Viewer pane to look at all of the reports.
+# If the report is empty, then there were no issues.
+fail_list
+
+#fix sample type
+
+
+
+```
+
 
 
 Write to the staging area
 
 ```{r update-flags-and-description}
+
 
 
 saveRDS(
