@@ -891,3 +891,214 @@ saveRDS(
 
 ```
 
+## Taxonomy prep - added 12/23/2025
+
+Taxonomy prep
+```{r}
+
+insect_dir <- file.path(
+  "L:",
+  "DOW",
+  "BWAM Share",
+  "data",
+  "parquet",
+  "build_tables",
+  "TAXONOMY.parquet")
+
+insect_name_dir <- file.path(
+  "L:",
+  "DOW",
+  "BWAM Share",
+  "data",
+  "parquet",
+  "build_tables",
+  "PREVIOUS_TAXON_NAME.parquet")
+
+insect_final_dir <- file.path(
+  "L:",
+  "DOW",
+  "BWAM Share",
+  "data",
+  "parquet",
+  "build_tables",
+  "TAXONOMIC_ABUNDANCE.parquet")
+
+insects_cw <- open_dataset(insect_dir) |> 
+  filter() |> 
+  # select(TAXON_ID) |> 
+  distinct() |> 
+  collect()
+
+insects_cw_name <- open_dataset(insect_name_dir) |> 
+  filter() |> 
+  # select(TAXON_ID) |> 
+  distinct() |> 
+  collect()
+
+taxa_obt<-open_dataset(insect_final_dir) |> 
+  filter() |> 
+  # select(TAXON_ID) |> 
+  distinct() |> 
+  collect()
+#using Rhett's analysis to create the taxonomy obt fils
+#adding project name
+raw$Client_Project_Name <- "Deer River RAS"
+
+# Renaming to DB standard -------------------------------------------------
+taxa_raw <- raw |> #---------------- Renaming the preexisting columns that are given in the WAA report
+  dplyr::select(SITE_CODEpre = MSSIH_EVENT_SMAS_HISTORY_ID,
+                EVENT_DATETIME = MSSIH_EVENT_SMAS_SAMPLE_DATE,
+                TAXON_ID = MSDH_GENSPECIES,
+                RESULT_VALUE = MSDH_INDIVIDUAL_SPECIES_CNT,
+                RESULT_COMMENT = MSSIH_TOTAL_INDIV_CNT_NOTE,
+                SUBSAMPLE_AMOUNT = 'X._Grids',
+                SAMPLE_METHOD = MSSIH_BIOSAMPLE_COLLECT_METHOD,
+                event_id = event_id,
+                REPLICATE = MSSIH_REPLICATE,
+                LAB_SAMPLE_ID = "WAA.ID",
+                PROJECT = Client_Project_Name)
+
+#correct event ids
+taxa_raw_event<-taxa_raw |> 
+  macro_event_corrections() |> 
+  mutate(site_id = site_corrections(SITE_CODEpre), 
+         EVENT_DATETIME = as.Date(EVENT_DATETIME,
+                                          format = "%m/%d/%Y")) #perfect! i think we wont need this anyway since we'll just hook it up with event_id
+
+
+taxa_raw_event<-taxa_raw_event |> 
+  mutate(SUBSAMPLE_AMOUNT_UNIT =
+           ifelse(is.na(SUBSAMPLE_AMOUNT) | SUBSAMPLE_AMOUNT == "", "not_applicable", "grid"))
+#this is assigning the SAMPLE_AMMOUNT_UNIT based on the value
+
+#---------- Now all that is needed is to trim the fat, or pull only the data that is necessary 
+taxa_final <- taxa_raw_event  |> 
+  select(SITE_CODE = SITE_CODEpre, 
+         "EVENT_DATETIME", 
+         "TAXON_ID", 
+         "RESULT_VALUE", 
+         "SAMPLE_METHOD",
+         "RESULT_COMMENT",
+         "SUBSAMPLE_AMOUNT", 
+         "SUBSAMPLE_AMOUNT_UNIT", 
+         "REPLICATE", 
+         "SAMPLE_METHOD", 
+         EVENT_ID = event_id,
+         "LAB_SAMPLE_ID",
+         "PROJECT") |> 
+  mutate(
+    RESULT_QUALIFIER = "",
+    UNIT = "count",
+    SAMPLE_SOURCE = "lab",
+    SAMPLE_TYPE = "macroinvertebrate_abundance"
+  )
+
+taxa_final2<- taxa_final %>%
+  mutate(TAXON_ID = gsub("undetermined_", "", TAXON_ID),  
+         TAXON_ID = gsub("_sp\\.|_gr\\.|_spp\\.", "", TAXON_ID),  # Remove all instances of _sp. and _gr.  
+         TAXON_ID = gsub("undet\\._tubificidae_w/_cap\\._setae", "tubificidae_with_cap_setae", TAXON_ID),  # Replace specific string  
+         TAXON_ID = gsub("undet\\._tubificidae_w/o_cap\\._setae", "tubificidae_without_cap_setae", TAXON_ID),  # Replace specific string  
+         TAXON_ID = gsub("_complex", "_co", TAXON_ID),  
+         TAXON_ID = gsub("_co", "_complex", TAXON_ID),  
+         TAXON_ID = gsub("_complexlumella", "_columella", TAXON_ID),
+         TAXON_ID = gsub("_complexrnutus", "_cornutus", TAXON_ID),
+         TAXON_ID = gsub("_complexffmani", "_coffmani", TAXON_ID),
+         TAXON_ID = gsub("/", "-", TAXON_ID),
+         TAXON_ID = gsub("_nr\\.", "", TAXON_ID),
+         TAXON_ID = gsub("\\?", "", TAXON_ID))
+
+# checking against taxon CW -----------------------------------------------
+cw_errors <- anti_join(taxa_final2, insects_cw, by = "TAXON_ID")
+
+taxon_corrections <- function(col){
+  stringr::str_replace_all(
+    col,
+    c("orthocladius_(euorthoclad.)_rivicola" = "orthocladius_euorthocladius_rivicola",
+      "orthocladius_(symposiocladius)_lignicola" ="orthocladius-symposiocladius_lignicola",
+      "drunella_complexrnutella"= "drunella_cornutella",
+      "paraleptophlebia" = "leptophlebia",
+      "lipiniella" = "chironomidae",
+      "glossiphonia_complexmplanata" = "glossiphonia_complanata" ))}
+
+
+taxa_final3<-taxa_final2 |> 
+  mutate(TAXON_ID= taxon_corrections(TAXON_ID)) |> 
+  #fix those - not sure why they wont do it in the code?
+  mutate(TAXON_ID = case_when(TAXON_ID %in% "orthocladius_(euorthoclad.)_rivicola" ~ "orthocladius_euorthocladius_rivicola",
+                                TAXON_ID %in% "orthocladius_(symposiocladius)_lignicola" ~ "orthocladius-symposiocladius_lignicola",
+                                TRUE ~ TAXON_ID))
+
+#check again
+cw_errors <- anti_join(taxa_final3, insects_cw, by = "TAXON_ID")
+#these look good!
+
+
+taxa_final4<-taxa_final3 |> select("SITE_CODE", "EVENT_DATETIME", "TAXON_ID", 
+"RESULT_VALUE", "SAMPLE_METHOD", "RESULT_COMMENT", "SUBSAMPLE_AMOUNT", 
+"SUBSAMPLE_AMOUNT_UNIT", "REPLICATE", "SAMPLE_METHOD", "EVENT_ID",
+"LAB_SAMPLE_ID", "PROJECT") |> 
+  mutate(RESULT_QUALIFIER = 0,
+         UNIT = "count",
+         SAMPLE_SOURCE = "lab",
+         SAMPLE_TYPE = "macroinvertebrate_abundance",
+         LAB_ANALYTICAL_METHOD = "not_applicable",
+         TEST_TYPE = "not_applicable",
+         RESULT_CATEGORY = "not_applicable",
+         LAB_QUALIFIER = "not_applicable",
+         PREP_METHOD = "not_applicable",
+         ANALYSIS_DATETIME = as.POSIXct(NA)
+         
+         )
+
+
+#look if there are any missing columns
+
+obt_cols<-names(taxa_obt)
+
+missing<- setdiff(obt_cols,names(taxa_final4)) #just missing the obt assigned FKs
+
+```
+
+```{r validation}
+
+# validation --------------------------------------------------------------
+
+#look for dupes
+# Find duplicate rows
+duplicates <- taxa_final4 %>%
+  group_by(across(c(EVENT_ID,REPLICATE,TAXON_ID))) %>%
+  filter(n() > 1)  #duplicates in replicate for the RMN network - let's adjust these
+
+
+#fix collection method
+taxa_final4<-taxa_final4 |> 
+   mutate(SAMPLE_METHOD = case_when(
+    SAMPLE_METHOD %in% "Kick: Standard" ~ "kick_standard",
+    SAMPLE_METHOD %in% "Multiplate: Navigable" ~ "multiplate_navigable",
+    SAMPLE_METHOD %in% "Multiplate: Non-Navigable" ~ "multiplate_non-navigable",
+    SAMPLE_METHOD %in% "Sediment Ponar" ~ "sediment_ponar",
+    SAMPLE_METHOD %in% "Kick: Sandy Stream" ~ "kick_sandy-stream",
+    SAMPLE_METHOD %in% "Kick: Headwater Stream" ~ "kick_standard",
+    SAMPLE_METHOD %in% "Multihabitat: Lake" ~ "multihabitat_lake",
+    SAMPLE_METHOD %in% "Low-Gradient" ~ "low_gradient",
+    SAMPLE_METHOD %in% "Lake: Ponar" ~ "lake_ponar",
+    SAMPLE_METHOD %in% "Lake: Littoral" ~ "lake_littoral",
+    SAMPLE_METHOD %in% "Other: Various (Historical)" ~ "other_various-historical",
+   TRUE ~ "unknown"))
+
+
+saveRDS(
+  object = taxa_final4,
+  file = file.path(
+    "L:",
+    "DOW",
+    "BWAM Share",
+    "data",
+    "data_warehouse_staging",
+    "2025",
+    "bap",
+    "taxa_2025_deer_river.rds"
+  )
+)
+
+```

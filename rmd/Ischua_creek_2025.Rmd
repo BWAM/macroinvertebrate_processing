@@ -62,7 +62,7 @@ if (params$file_type=="waa"){tables_1_2.waa(prepped_df)}
 #Run BAP and create BAP entry for table
 library(BAP)
 
-saveRDS(bap.prepped,here::here("outputs/bap_prepped.RDS"))
+#saveRDS(bap.prepped,here::here("outputs/bap_prepped.RDS"))
 #looking at zach's
 
 zach<-readRDS(here::here("outputs/bap_prep_zs.RDS"))
@@ -77,7 +77,7 @@ bap.prepped<-bap.prepped %>%
 
 #split by collection method and run the appropriate BA
 bap.final<-apply_bap(bap.prepped)
-bap.final_zs<-apply_bap(zach)
+#bap.final_zs<-apply_bap(zach)
 
 bap.finalzach<-BAP::bap_riffle(zach)
 
@@ -100,28 +100,9 @@ Prep for WQMA
 #write these to the L drive, hashed out to not overwrite
 #write.csv(metrics.subset, "L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/METRICS_2023_processed_11_5_24_KAR.csv" )
 #write.csv(samp_event,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/MACRO_SAMP_INF_2023_processed_11_5_24_KAR.csv")
+final_event<-samp_event
 
-#combine deer river and 2023 samples and re-save
-event_2023<-read.csv("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/MACRO_SAMP_INF_2023_processed_11_5_24_KAR.csv")
-event_deer<-read.csv("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/20241007_S_MACRO_SAMP_INF_HIST_deer_river.csv")
-#add missing group column (not used for streams)
-event_deer$MSSIH_GROUP<-""
-
-#bind them
-final_event<-rbind(event_2023,event_deer) #good they match
-final_event$X<-NULL #remove weird column
-
-#write to folder and move the archive that was the originals to another folder (archive)
-#write.csv(final_event,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_sample_inf.csv")
-#i saved these to file just in cae
-
-
-#read in th two metric files
-metrics_2023<-read.csv("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/METRICS_2023_processed_11_5_24_KAR.csv")
-metrics_deer<-read.csv("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/archive/20241007_METRICS_deer_river.csv")
-
-#bind them, these have differing columns bc of hte metric differences; but the amount is fine - 377 of 2023 plus 6 from deer river for 383 total - which is less than the event table since some of them CANT have metrics calculated yet.
-final_metrics<-dplyr::full_join(metrics_2023,metrics_deer)
+final_metrics<-metrics.subset
 
 #join a couple fields to the metrics file 
 cols<-final_event %>% 
@@ -145,194 +126,28 @@ if (nrow(final_metrics_2) != nrow(cols)) {stop("Number of rows don't match, chec
 
 final_metrics_2$EVENT_ID<-NULL #remove the event id as it's not in the right format - it's the output from the BAP package
 
-#write to folder and move the archive that was the originals to another folder (archive)
-#write.csv(final_metrics_2,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_metrics.csv")
-```
+#our new coc will have time and event ids already populated, for this i had to create them, and check whats in the db already
 
-Site corrections from the look-up file from Charlie
-
-```{r site-id-corrections}
-
-#read in the 2023 ones
-sites_survey_23<-readxl::read_excel("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/siteIdCrosswalkTable2023_v3_2025_01_30.xlsx")
-sites_survey_24<-readxl::read_excel("L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/siteIdCrosswalkTable2024_v4_2025_01_27.xlsx")
-
-
-sites_23<-sites_survey_23 %>% 
-  select(finalSiteID,revisedOriginalSiteID, eventSMASSampleDate,eventSMASArrivetime,eventSMASId) %>% 
-  mutate(EVENT_ID = eventSMASId,
-         DATE = eventSMASSampleDate) %>% 
-  mutate(DATE = as.Date(DATE, "%m/%d/%y")) %>% 
-  distinct() %>% 
-  select(c(finalSiteID,revisedOriginalSiteID,EVENT_ID,DATE))
-
-sites_24<-sites_survey_24 %>% 
-  select(finalSiteID,revisedOriginalSiteID, eventSMASSampleDate,eventSMASArrivetime) %>% 
-  mutate(DATE = eventSMASSampleDate) %>% 
-  mutate(DATE = as.Date(DATE, "%m/%d/%Y")) %>% 
-  mutate(EVENT_ID = paste(finalSiteID,"_",
-                          format(DATE,'%Y%m%d'),
-                          "T",
-                          stringr::str_replace(eventSMASArrivetime,":",""),
-                          sep = "")) |> 
-  distinct() %>% 
-  select(c(finalSiteID,revisedOriginalSiteID,EVENT_ID,DATE))
-
-#combine 23 and 24
-sites_23_24<-rbind(sites_23,
-                   sites_24) %>% 
-  rename(site_id = revisedOriginalSiteID,
-         final_id = finalSiteID)# number of rows match here for the rbind
-sites_23_24<-sites_23_24 %>% 
-  distinct()
-
-#ok now we'll bind to the final_metrics_2 df before we adjust for WQMA compatability
-
-final_metrics_2$DATE<-as.Date(final_metrics_2$DATE,"%Y-%m-%d")
-
-
-final_metrics_3<-left_join(
-  final_metrics_2,
-  sites_23_24,
-  by = c("site_id","DATE")
-)
-
-#let's look at the ones that didnt join
-missing_events<-final_metrics_3 %>% 
-  subset(is.na(final_id))
-
-
-#site adjustments based on the join - there will likely be some here that do not exist and need to be created
-
-final_metrics_4<-final_metrics_3 %>% #first correct dates that don't match the surveys
-  mutate(site_id = case_when(site_id %in% '11-LHUD-117.1'~'13-LHUD-117.1',
-                             TRUE ~ site_id),
-         new_DATE =
-           case_when(site_id %in% '10-BOQT-28.6' & DATE == "2023-07-27"~"2023-07-26",
-                     site_id %in% "10-GRAV-5.7" & DATE %in% "2023-07-27"~"2023-07-25",
-                     site_id %in% '10-LSAB-17.6' & DATE %in% "2023-07-26"~"2023-07-25",
-                     site_id %in% '10-LSAB-5.7' & DATE %in% "2023-07-26"~"2023-07-25",
-                     #site_id %in% '10-SABL_W-32.1' & DATE %in% "2023-07-20"~"2023-07-26",
-                     site_id %in% '10-SARA-21.8' & DATE %in% "2023-07-26"~"2023-07-25",
-                     site_id %in% '11-UHUD-2.0' & DATE %in% "2023-09-01"~"2023-09-13",
-                     site_id %in% '12-MOHK-65.8' & DATE %in% "2023-09-01"~"2023-09-12",
-                     site_id %in% '12-MOHK-65.8' & DATE %in% "2023-09-14"~"2023-09-12",
-                     site_id %in% '13-LHUD-117.1' & DATE %in% "2023-09-17"~"2023-09-11",
-                     TRUE ~ paste(DATE)
-
-           )) %>%
-  mutate(DATE = as.Date(new_DATE,"%Y-%m-%d"))
-
-
-#check for missing sites again - first remove the old joined columns since they will re-join and mess it up
-final_metrics_4<-final_metrics_4 %>% 
-  select(-c(final_id,EVENT_ID))
-
-final_metrics_4<-left_join(
-  final_metrics_4,
-  sites_23_24,
-  by = c("site_id","DATE")
-)
-
-#let's look at the ones that didnt join
-missing_events<-final_metrics_4 %>% 
-  subset(is.na(final_id))
-
-#make notes for these
-missing_events<-missing_events %>% 
-  mutate(notes = "",
-         missing_survey = "",
-         missing_site = "") %>% 
-  mutate(missing_site = case_when(
-    site_id %in% "10-CADE-6.2"~"T",
-    site_id %in% "10-SABL_W-25.6" ~"F",
-    site_id %in% "10-SMOW-0.1" ~"T", 
-    site_id %in% "11-ARCH-1.9" ~"F", 
-    site_id %in% "11-BORE-13.6" ~"T", 
-    site_id %in% "11-BORE-19.4" ~"T",
-    site_id %in% "11-GULF-0.7" ~"T",
-    site_id %in% "11-JONS-2.1" ~"T",
-    site_id %in% "11-WPBR-0.6" ~"T",
-    site_id %in% "12-SIMB-0.5" ~"T",
-    site_id %in% "13-LHUD-117.1" ~"T",
-    site_id %in% "11-UHUD-42.5" ~ "F",
-    TRUE~"F")) %>% 
-  mutate(missing_survey = case_when(
-      site_id %in% "10-CADE-6.2"~"T",
-    site_id %in% "10-SABL_W-25.6" ~"T",
-    site_id %in% "10-SMOW-0.1" ~"T", 
-    site_id %in% "11-ARCH-1.9" ~"T", 
-    site_id %in% "11-BORE-13.6" ~"T", 
-    site_id %in% "11-BORE-19.4" ~"T",
-    site_id %in% "11-GULF-0.7" ~"T",
-    site_id %in% "11-JONS-2.1" ~"T",
-    site_id %in% "11-WPBR-0.6" ~"T",
-    site_id %in% "12-SIMB-0.5" ~"T",
-    site_id %in% "11-UHUD-42.5" ~ "T",
-    
-    TRUE~"F"
-  )) %>% 
-    mutate(notes = case_when(
-    site_id %in% "10-CADE-6.2"~"Not in site selection template either",
-    site_id %in% "10-SABL_W-25.6" ~"There are 3 potential matches in the survey, 7/26/23 matched fine, but there is another date 7/20 with 2 replicates??",
-    site_id %in% "10-SMOW-0.1" ~"This one is not in teh sites table or the 23 site selection, maybe Tom? ", 
-    site_id %in% "11-ARCH-1.9" ~"Create event id", 
-    site_id %in% "11-BORE-13.6" ~"Not in sites table or 23 site selection", 
-    site_id %in% "11-BORE-19.4" ~"Not in sites table or 23 site selection",
-    site_id %in% "11-GULF-0.7" ~"Not in sites table or 23 site selection",
-    site_id %in% "11-JONS-2.1" ~"Not in sites table or 23 site selection",
-    site_id %in% "11-WPBR-0.6" ~"Not in sites table or 23 site selection",
-    site_id %in% "12-SIMB-0.5" ~"Not in sites table or 23 site selection",
-    site_id %in% "11-UHUD-42.5" ~ "no matching dates for this site",
-    TRUE~"F"))
-
-#checked - these do not exist in the existing survey checks OR the 2023 that are in the database
-#write to .csv for checking, then hashed out to keep from overwriting when checking
-#write.csv(missing_events,here::here("outputs/bap_missing_sites_surveys_12_5_24.csv"))
-
-#create the one event ID that I can - the one that has a site that exists already -11-ARCH-1.9
-
-final_metrics_4<-final_metrics_4 %>% 
-  distinct() |> 
-  mutate(EVENT_ID = case_when(
-    site_id %in% "11-ARCH-1.9"~"11-ARCH-1.9_20230918T1200",
-    site_id %in% "10-CHUB-2.2" ~ "10-CHUB-2.2_20230726T1200",
-    site_id %in% "10-SABL-0.4"~ "10-SABL_E-0.4_20230726T1230",
-    site_id %in% "13-WAPP_E-3.2" ~ "13-WAPP_E-3.2_20240718T1038",
-    site_id %in% "10-JACK-0.2" ~ "10-JKBR-0.2_20230726T1030",
-    site_id %in% "12-SIMB-0.5" ~ "10-SMIB-0.5_20240727T1230",
-    TRUE ~ EVENT_ID
-  ),
-  final_id = case_when(
-    site_id %in% "10-SABL-0.4" ~ "10-SABL_E-0.4",
-    site_id %in% "11-ARCH-1.9" ~ "11-ARCH-1.9",
-    site_id %in% "10-JACK-0.2" ~ "10-JKBR-0.2",
-    site_id %in% "13-WAPP_E-3.2" ~ "13-WAPP_E-3.2",
-    site_id %in% "12-SIMB-0.5" ~ "10-SMIB-0.5",
-    TRUE ~ final_id))
-
-#subset to the complete ones for creating the .RDS files
-final_metrics_5<-final_metrics_4 %>% 
-  filter(!is.na(EVENT_ID)) 
-
-#clean it up
-final_metrics_5<-final_metrics_5 %>% 
-  mutate(MSSIH_EVENT_SMAS_HISTORY_ID = final_id,
-         MSSIH_EVENT_SMAS_SAMPLE_DATE = DATE) %>% #make all the columns agree
-  select(-c(new_DATE,date)) %>% 
-  distinct()
-
-#write to file
- # write.csv(final_metrics_5,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_metrics_cleaned_preWQMAval.csv")
-
-
+final_metrics_3<-final_metrics_2 |> 
+  mutate(EVENT_ID = case_match(site_id,
+                              "02-ISCH-0.9" ~ "02-ISCH-0.9_20250828_T1245",
+                              "02-ISCH-10.9" ~ "02-ISCH-10.9_20250828_T1730",
+                              "02-ISCH-13.8" ~ "02-ISCH-13.8_20250828_T0845",
+                              "02-ISCH-15.1" ~ "02-ISCH-15.1_20250828_T1200",
+                              "02-ISCH-17.2" ~ "02-ISCH-17.2_20250828_T1015",
+                              "02-ISCH-19.0" ~ "02-ISCH-19.0_20250828_T1200",
+                              "02-ISCH-6.1"  ~ "02-ISCH-6.1_20250828_T1330",
+                              "02-ISCH-8.7"  ~ "02-ISCH-8.7_20250828_T0945",
+                              "02-OLEA-3.9"  ~ "02-OLEA-3.9_20250828_T1200",
+                              .default = "error"))
 
 ```
+
 
 ```{r create-new-sample-final}
 #create new sample file as well
 
-sample_final<-final_metrics_5 %>% 
+sample_final<-final_metrics_3 %>% 
   select(c(starts_with("MSSIH_"),EVENT_ID))
 
 #need the counts-so we'll get those from the originally created sample table
@@ -349,13 +164,15 @@ sample_final_2<-left_join(sample_final,samp_small,
 sample_final_2<-sample_final_2 %>% 
   distinct()
 #create check
-final_metrics_5<-final_metrics_5 %>% 
+final_metrics_4<-final_metrics_3 %>% 
   distinct()
 
-if (nrow(sample_final_2) != nrow(final_metrics_5)) {stop("Number of rows don't match, check the matching")}
+if (nrow(sample_final_2) != nrow(final_metrics_4)) {stop("Number of rows don't match, check the matching")}
 
 #save to file
- # write.csv(sample_final_2,"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores/2023_all_2024_deer_river_sample_inf_cleaned_preWQMAval.csv")
+ write_csv(sample_final_2,"L:/DOW/BWAM Share/data/data_warehouse_staging/2025/bap/bap_sample_ischua_2025.csv")
+  write_csv(final_metrics_4,"L:/DOW/BWAM Share/data/data_warehouse_staging/2025/bap/bap_metrics_ischua_2025.csv")
+ 
 ```
 
 
@@ -619,7 +436,8 @@ Read in my prepped files and adjust the sample table with Zach's code
 ```{r}
 
 
-data_dir<-"L:/DOW/BWAM Share/data/data_warehouse_staging/2024_V3/raw_data/stream/processed_bap_scores"
+
+data_dir<-"L:/DOW/BWAM Share/data/data_warehouse_staging/2025/bap/"
 
 standard_read_csv <- function(file, col_types = NULL) {
   readr::read_csv(
@@ -632,10 +450,10 @@ standard_read_csv <- function(file, col_types = NULL) {
 import_s_macro_sample <- function(data_dir) {
   standard_read_csv(
     file = file.path(data_dir,
-                     "2023_all_2024_deer_river_sample_inf_cleaned_preWQMAval.csv"),
+                     "bap_sample_ischua_2025.csv"),
     col_types = cols(
       MSSIH_EVENT_SMAS_HISTORY_ID = col_character(),
-      MSSIH_EVENT_SMAS_SAMPLE_DATE = col_date(format = "%Y-%m-%d"), #updated the date format here
+      MSSIH_EVENT_SMAS_SAMPLE_DATE = col_date(format = "%m-%d-%Y"), #updated the date format here
       MSSIH_REPLICATE = col_character(),
       MSSIH_TAXONOMIST = col_character(),
       MSSIH_BIOSAMPLE_COLLECT_METHOD = col_character(),
@@ -685,7 +503,7 @@ prep_s_macro_sample <- function(x, s_event) {
 
 #run the functions
 imported_sample<-import_s_macro_sample(data_dir)
-prepped_sample_table<-prep_s_macro_sample(imported_sample,s_event = s_event_2023) 
+prepped_sample_table<-prep_s_macro_sample(imported_sample,s_event = samp_event) 
 
 setdiff(prepped_sample_table$event_id, imported_sample$EVENT_ID) 
 imported_sample_check<-imported_sample %>% 
@@ -712,7 +530,7 @@ Then prep the metrics file using Zach's code
 import_s_macro_metrics <- function(data_dir) {
   standard_read_csv(
     file = file.path(data_dir,
-                     "2023_all_2024_deer_river_metrics_cleaned_preWQMAval.csv"),
+                     "bap_metrics_ischua_2025.csv"),
            col_types = cols(
              MMDH_RICHNESS = col_double(),
              MMDH_RICHNESS_SCORE = col_double(),
@@ -734,7 +552,7 @@ import_s_macro_metrics <- function(data_dir) {
              MSSIH_BIOSAMPLE_COLLECT_METHOD = col_character(),
              MSSIH_BIOSAMPLE_COLLECT_METHOD_NUM = col_double(),
              MSSIH_EVENT_SMAS_HISTORY_ID = col_character(),
-             MSSIH_EVENT_SMAS_SAMPLE_DATE = col_date(format = "%Y-%m-%d"), #updated by KAR
+             MSSIH_EVENT_SMAS_SAMPLE_DATE = col_date(format = "%m-%d-%Y"), #updated by KAR
              MSSIH_REPLICATE = col_double(),
              MSSIH_GROUP = col_character(),
              EVENT_ID = col_character()
@@ -757,14 +575,14 @@ prep_s_macro_metrics <- function(x, s_event, s_macro_sample) {
       score_ept_richness = MMDH_EPT_SCORE,
       raw_hilsenhoff_biotic_index = MMDH_HBI_INDEX,
       score_hilsenhoff_biotic_index = MMDH_HBI_SCORE,
-      raw_shannon_diversity = MMDH_SHANNON,
-      score_shannon_diversity = MMDH_SHANNON_SCORE,
+      #raw_shannon_diversity = MMDH_SHANNON,
+      #score_shannon_diversity = MMDH_SHANNON_SCORE,
       raw_percent_model_affinity = MMDH_PCT_MODEL_AFFINITY,
       score_percent_model_affinity = MMDH_PCT_MODEL_AFFINITY_SCORE,
       raw_nutrient_biotic_index_phosphorus = MMDH_NUTRIENT_BIOTIC_INDEX_P,
       score_nutrient_biotic_index_phosphorus = MMDH_NBI_P_SCORE,
-      raw_non_chiro_oligo_richness = MMDH_NCO_RICH,
-      score_non_chiro_oligo_richness = MMDH_NCO_RICH_SCORE,
+      #raw_non_chiro_oligo_richness = MMDH_NCO_RICH,
+      #score_non_chiro_oligo_richness = MMDH_NCO_RICH_SCORE,
       event_id = EVENT_ID
      # raw_percent_dominance_3 = MMDH_PCT_DOMINANCE_3,
       #score_percent_dominance_3 = MMDH_PCT_DOMINANCE_3_SCORE # dont have these in the file so i have to hash them out - these are sandy i think?
@@ -795,7 +613,7 @@ prep_s_macro_metrics <- function(x, s_event, s_macro_sample) {
     select(-taxonomist) |> 
     distinct() |> 
     tidyr::pivot_longer(
-      cols = c(score_bioassessment_profile:score_non_chiro_oligo_richness,total_individual_count),
+      cols = c(score_bioassessment_profile:score_nutrient_biotic_index_phosphorus,total_individual_count),#this should be different bc you have to change it to fit your metrics - we shoudl look at something thats not as spelled out?
       names_to = "metric_name",
       values_to = "metric_value",
       values_drop_na = TRUE
@@ -851,9 +669,9 @@ assign_s_biosurvey_parameter_description  <- function(x) {
   )
 }
 
-imported_metrics<-import_s_macro_metrics(data_dir)
+imported_metrics<-import_s_macro_metrics(data_dir) #some of the metrics are different but thats ok, we dont have them all in this file since its just kick and low gradient
 
-prepped_metrics<-prep_s_macro_metrics(imported_metrics, s_event_2023, prepped_sample_table)
+prepped_metrics<-prep_s_macro_metrics(imported_metrics, samp_event, prepped_sample_table)
 
 #fix the 2 site_id columns by removing one of them
 prepped_metrics<-prepped_metrics %>% 
@@ -874,20 +692,6 @@ setdiff(prepped_sample_table$event_id, prepped_metrics$event_id)
 prepped_metrics %>% skim()
 prepped_sample_table %>% skim()
 
-#fix Archer creek AGAIN
-prepped_sample_table<-prepped_sample_table %>% 
-  mutate(site_id = case_when(event_id %in% "11-ARCH-1.9_20230918T1200" ~ "11-ARCH-1.9",
-                             event_id %in% "13-WAPP_E-3.2_20240718T1038" ~ "13-WAPP_E-3.2",
-                             event_id %in% "10-JKBR-0.2_20230726T1030" ~ "10-JKBR-0.2",
-                             TRUE~site_id))
-
-prepped_metrics<-prepped_metrics %>% 
-  mutate(site_id = case_when(event_id %in% "11-ARCH-1.9_20230918T1200" ~ "11-ARCH-1.9",
-                             event_id %in% "13-WAPP_E-3.2_20240718T1038" ~ "13-WAPP_E-3.2",
-                             event_id %in% "10-JKBR-0.2_20230726T1030" ~ "10-JKBR-0.2",
-                             TRUE~site_id))
-  
-
 ```
 
 
@@ -901,14 +705,14 @@ range(check$result_value)  #looks good, should be between 1-10
 prepped_metrics2<-prepped_metrics %>% 
   mutate(result_category = case_when(
     parameter_name %in% "bioassessment_profile" & result_value < 2.5 ~ "severly_impacted",
-    parameter_name %in% "bioassessment_profile" & between(result_value, 2.5,5.0) ~ "moderately_impacted", 
-    parameter_name %in% "bioassessment_profile" & between(result_value, 5.0,7.5) ~ "slightly_impacted", 
+    parameter_name %in% "bioassessment_profile" & between(result_value, 2.5,4.99) ~ "moderately_impacted", 
+    parameter_name %in% "bioassessment_profile" & between(result_value, 5.0,7.49) ~ "slightly_impacted", 
     parameter_name %in% "bioassessment_profile" & result_value > 7.5 ~ "non_impacted", 
     TRUE ~ ""
   )) #use event id to determine the flags
 
-#flags for < total amount
-event_ids_tc<-prepped_metrics2 %>% 
+##flags for < total amount
+event_ids_tc<-prepped_metrics2 %>%  #check this for littoral
   filter(parameter_name %in% "total_individual_count") %>% 
   mutate(result_qualifier = case_when(collection_method %in% 
                                  (collection_method %in% "Kick: Standard" & result_value < 100) ~ "<tc",
@@ -920,10 +724,11 @@ event_ids_tc<-prepped_metrics2 %>%
                                  TRUE ~ ""
                                  )) %>% 
 filter(result_qualifier %in% "<tc" )
+
 #subset the event ids that will need the <tc for the final bap score 
 event_ids_tc.l<-unique(event_ids_tc$event_id)
 
-prepped_metrics2<-prepped_metrics2 %>% 
+prepped_metrics3<-prepped_metrics2 %>% 
   mutate(result_qualifier = case_when(
     event_id %in% event_ids_tc.l ~ "<tc",
     TRUE ~ ""
@@ -934,7 +739,7 @@ prepped_metrics2<-prepped_metrics2 %>%
   ))
   
 #I was going to update the collection method - but htat looks like it's part of hte sample table, so i will do it here and not in the results table
-prepped_sample_table2<-prepped_sample_table %>% 
+prepped_sample_table2<-prepped_sample_table |> 
   mutate(sample_method = case_when(
     collection_method %in% "Kick: Standard" ~ "kick_standard",
     collection_method %in% "Multiplate: Navigable" ~ "multiplate_navigable",
@@ -945,22 +750,25 @@ prepped_sample_table2<-prepped_sample_table %>%
     collection_method %in% "Multihabitat: Lake" ~ "multihabitat_lake",
     collection_method %in% "Low-Gradient" ~ "low_gradient",
     collection_method %in% "Lake: Ponar" ~ "lake_ponar",
+    collection_method %in% "Ponar" ~ "lake_ponar",
     collection_method %in% "Lake: Littoral" ~ "lake_littoral",
+    collection_method %in% "Littoral" ~ "lake_littoral",
     collection_method %in% "Other: Various (Historical)" ~ "other_various-historical",
    TRUE ~ "unknown"
   ))
 
+
 #make all column names capital
-names(prepped_metrics2) <- base::toupper(names(prepped_metrics2))
+names(prepped_metrics3) <- base::toupper(names(prepped_metrics3))
 names(prepped_sample_table2)<-base::toupper(names(prepped_sample_table2))
 
 #adding parameter table columns and missing result table columns
-prepped_metrics3<-prepped_metrics2 %>% 
+prepped_metrics3<-prepped_metrics3 %>% 
   mutate(CASRN = "not_applicable",
          FRACTION = "not_applicable",
          MATRIX = "not_applicable",
          METHOD_SPECIATION = "not_applicable",
-         UNIT = "not_applicable",
+         #UNIT = "not_applicable", #fixed this on 10/30/25
          DETECT_FLAG = "not_applicable",
          DETECTION_LIMIT_UNIT = "not_applicable",
          FINAL_VOLUME_UNIT = "not_applicable",
@@ -970,9 +778,9 @@ prepped_metrics3<-prepped_metrics2 %>%
          FINAL_VOLUME = as.numeric(NA),
          FINAL_VOLUME_UNIT = "not_applicable",
          LAB_ANALYTICAL_METHOD = "not_applicable",
-         LAB_QUALIFIER = "",
+         LAB_QUALIFIER = "0",
          LAB_SAMPLE_ID = "not_applicable",
-         LAB_VALIDATION_LEVEL = "",
+         LAB_VALIDATION_LEVEL = "not_applicable",
          METHOD_DETECTION_LIMIT = as.numeric(NA),
          PREP_DATETIME = as.POSIXct(NA),
          PREP_METHOD = "not_applicable",
@@ -999,10 +807,10 @@ prepped_metrics3<-prepped_metrics2 %>%
     COLLECTION_METHOD %in% "Lake: Littoral" ~ "lake_littoral",
     COLLECTION_METHOD %in% "Other: Various (Historical)" ~ "other_various-historical",
    TRUE ~ "unknown"
-  )) %>%
+  )) |> 
   #adding the missing sample columns, first change the name and then get the rest
 rename(SAMPLE_LOCATION = SAMPLING_LOCATION,
-       SAMPLE_ORGANIZATION = ORGANIZATION_NAME) %>% 
+       SAMPLE_ORGANIZATION = ORGANIZATION_NAME) |> 
   mutate(
     SAMPLE_DELIVERY_GROUP = "not_applicable",
     SAMPLE_DEPTH_METERS = as.numeric(NA),
@@ -1011,10 +819,10 @@ rename(SAMPLE_LOCATION = SAMPLING_LOCATION,
     SAMPLE_NAME = "unknown",
     SAMPLE_METHOD_REFERENCE = "SOP#216",
     SAMPLE_METHOD_DESCRIPTION = "kick_net",
-    SAMPLE_LAB = "WAA",
-    SAMPLE_COMMENT = "none") %>% 
+    SAMPLE_LAB = "Watershed Assessment Associates (WAA)",
+    SAMPLE_COMMENT = "none", 
+    SAMPLE_TYPE = "macroinvertebrate_metrics")|> 
   select(-c(COLLECTION_METHOD))
-
 
 ```
 
@@ -1059,8 +867,78 @@ check<-janitor::compare_df_cols(sample_df,
                          return = "mismatch")
 #these look good
 
+#update the result_qualifier
+prepped_metrics4<-prepped_metrics3 |> 
+  mutate(RESULT_QUALIFIER = case_when(RESULT_QUALIFIER %in% "" ~as.character(0),
+                                      TRUE ~ RESULT_QUALIFIER),
+         RESULT_CATEGORY = case_when(RESULT_CATEGORY %in% "" ~ "not_applicable",
+                                     TRUE ~ RESULT_CATEGORY))
+
 ```
 
+
+```{r validation}
+# Setup -------------------------------------------------------------------
+# Install the BWAM_ETL package to gain access to functions for table splitting and validation.
+# install.packages("pak")
+ #pak::pak("BWAM/BWAM_ETL")
+library("BWAM.ETL")
+library(purrr)
+
+# Read in or Prep your OBT ------------------------------------------------
+# Example OBT to be replaced with your own OBT data frame.
+obt_df <- prepped_metrics4
+obt_df$SAMPLE_CREW<-""
+
+# Split the OBT into the target tables ------------------------------------
+# Vector of target tables
+table_vec <- c("RESULT", "SAMPLE")
+
+prep_list <- table_vec |>
+  purrr::set_names() |>
+  # prep_wqma_table
+  purrr::map( ~ prep_wqma_table(
+    df = obt_df,
+    target_table_name = .x,
+    add_uid_md5 = FALSE
+  ))
+
+# Example of how to extract a list element.
+t1 <- prep_list$RESULT
+
+# Run the validation for each target table --------------------------------
+val_list <- table_vec |>
+  purrr::set_names() |>
+  purrr::map(~ validate(
+    df = prep_list[[.x]],
+    table_name = .x,
+    return_report = TRUE
+  ))
+
+# Example of how to check validation.
+# In this example, you can see (89-91) the columns SUBSAMPLE_AMOUNT, ANALYSIS_DATETIME, and PREP_DATETIME
+# are not the expected column type (e.g., numeric, posix, etc.)
+val_list$RESULT
+val_list$SAMPLE
+
+
+# Get just the failed validation checks
+fail_list <- table_vec |>
+  purrr::set_names() |>
+  purrr::map( ~ pointblank::get_agent_report(agent = val_list[[.x]],
+                                             keep = "fail_states"))
+# This will print out n amount of reports, where n = length(table_vec)
+# You can use the arrows at the top left of the RStudio Viewer pane to look at all of the reports.
+# If the report is empty, then there were no issues.
+fail_list
+
+#warn about result_category and result_qualifier
+
+
+
+
+
+```
 
 Write to the staging area
 
@@ -1075,9 +953,9 @@ saveRDS(
     "BWAM Share",
     "data",
     "data_warehouse_staging",
-    "2024_V3",
-    "raw_data",
-    "bap_metrics.rds"
+    "2025",
+    "bap",
+    "bap_metrics_ischua.rds"
   )
 )
 
@@ -1089,11 +967,211 @@ saveRDS(
     "BWAM Share",
     "data",
     "data_warehouse_staging",
-    "2024_V3",
-    "raw_data",
-    "bap_sample_table.rds"
+    "2025",
+    "bap",
+    "bap_sample_table_ischua.rds"
   )
 )
+
+```
+
+Taxonomy prep
+```{r}
+
+insect_dir <- file.path(
+  "L:",
+  "DOW",
+  "BWAM Share",
+  "data",
+  "parquet",
+  "build_tables",
+  "TAXONOMY.parquet")
+
+insect_name_dir <- file.path(
+  "L:",
+  "DOW",
+  "BWAM Share",
+  "data",
+  "parquet",
+  "build_tables",
+  "PREVIOUS_TAXON_NAME.parquet")
+
+insect_final_dir <- file.path(
+  "L:",
+  "DOW",
+  "BWAM Share",
+  "data",
+  "parquet",
+  "build_tables",
+  "TAXONOMIC_ABUNDANCE.parquet")
+
+insects_cw <- open_dataset(insect_dir) |> 
+  filter() |> 
+  # select(TAXON_ID) |> 
+  distinct() |> 
+  collect()
+
+insects_cw_name <- open_dataset(insect_name_dir) |> 
+  filter() |> 
+  # select(TAXON_ID) |> 
+  distinct() |> 
+  collect()
+
+taxa_obt<-open_dataset(insect_final_dir) |> 
+  filter() |> 
+  # select(TAXON_ID) |> 
+  distinct() |> 
+  collect()
+#using Rhett's analysis to create the taxonomy obt fils
+
+# Renaming to DB standard -------------------------------------------------
+event_ids<-final_metrics_4 |> 
+  select(MSSIH_EVENT_SMAS_HISTORY_ID=site_id,EVENT_ID) |> 
+  distinct()
+#manually add in the missing one
+missing_site<-"02-ISCH-15.9"
+event_missing <- "02-ISCH-15.9_20250828_T1330"
+# Combining vectors into a dataframe
+df1 <- data.frame(MSSIH_EVENT_SMAS_HISTORY_ID = missing_site , 
+                  EVENT_ID = event_missing)
+
+event_ids2<-rbind(event_ids,df1)
+
+
+raw_merge<-merge(raw,event_ids2,
+                 by = "MSSIH_EVENT_SMAS_HISTORY_ID")
+
+
+taxa_raw <- raw_merge |> #---------------- Renaming the preexisting columns that are given in the WAA report
+  dplyr::select(SITE_CODEpre = MSSIH_EVENT_SMAS_HISTORY_ID,
+                EVENT_DATETIME = MSSIH_EVENT_SMAS_SAMPLE_DATE,
+                TAXON_ID = MSDH_GENSPECIES,
+                RESULT_VALUE = MSDH_INDIVIDUAL_SPECIES_CNT,
+                RESULT_COMMENT = MSSIH_TOTAL_INDIV_CNT_NOTE,
+                SUBSAMPLE_AMOUNT = 'X._Grids',
+                SAMPLE_METHOD = MSSIH_BIOSAMPLE_COLLECT_METHOD,
+                event_id = EVENT_ID,
+                REPLICATE = MSSIH_REPLICATE,
+                LAB_SAMPLE_ID = "WAA.ID") |> 
+  mutate(PROJECT = "Ischua Creek")
+
+#correct event ids
+taxa_raw_event<-taxa_raw |> 
+  macro_event_corrections() |> 
+  mutate(site_id = site_corrections(SITE_CODEpre), 
+         EVENT_DATETIME = as.Date(EVENT_DATETIME,
+                                          format = "%m/%d/%Y")) #perfect! i think we wont need this anyway since we'll just hook it up with event_id
+
+
+taxa_raw_event<-taxa_raw_event |> 
+  mutate(SUBSAMPLE_AMOUNT_UNIT =
+           ifelse(is.na(SUBSAMPLE_AMOUNT) | SUBSAMPLE_AMOUNT == "", "not_applicable", "grid"))
+#this is assigning the SAMPLE_AMMOUNT_UNIT based on the value
+
+#---------- Now all that is needed is to trim the fat, or pull only the data that is necessary 
+taxa_final <- taxa_raw_event  |> 
+  select(SITE_CODE = SITE_CODEpre, 
+         "EVENT_DATETIME", 
+         "TAXON_ID", 
+         "RESULT_VALUE", 
+         "SAMPLE_METHOD",
+         "RESULT_COMMENT",
+         "SUBSAMPLE_AMOUNT", 
+         "SUBSAMPLE_AMOUNT_UNIT", 
+         "REPLICATE", 
+         "SAMPLE_METHOD", 
+         EVENT_ID = event_id,
+         "LAB_SAMPLE_ID",
+         "PROJECT") |> 
+  mutate(
+    RESULT_QUALIFIER = "",
+    UNIT = "count",
+    SAMPLE_SOURCE = "lab",
+    SAMPLE_TYPE = "macroinvertebrate_abundance"
+  )
+
+taxa_final2<- taxa_final %>%
+  mutate(TAXON_ID = gsub("undetermined_", "", TAXON_ID),  
+         TAXON_ID = gsub("_sp\\.|_gr\\.|_spp\\.", "", TAXON_ID),  # Remove all instances of _sp. and _gr.  
+         TAXON_ID = gsub("undet\\._tubificidae_w/_cap\\._setae", "tubificidae_with_cap_setae", TAXON_ID),  # Replace specific string  
+         TAXON_ID = gsub("undet\\._tubificidae_w/o_cap\\._setae", "tubificidae_without_cap_setae", TAXON_ID),  # Replace specific string  
+         TAXON_ID = gsub("_complex", "_co", TAXON_ID),  
+         TAXON_ID = gsub("_co", "_complex", TAXON_ID),  
+         TAXON_ID = gsub("_complexlumella", "_columella", TAXON_ID),
+         TAXON_ID = gsub("_complexrnutus", "_cornutus", TAXON_ID),
+         TAXON_ID = gsub("_complexffmani", "_coffmani", TAXON_ID),
+         TAXON_ID = gsub("/", "-", TAXON_ID),
+         TAXON_ID = gsub("_nr\\.", "", TAXON_ID),
+         TAXON_ID = gsub("\\?", "", TAXON_ID))
+
+# checking against taxon CW -----------------------------------------------
+cw_errors <- anti_join(taxa_final2, insects_cw, by = "TAXON_ID")
+
+taxon_corrections <- function(col){
+  stringr::str_replace_all(
+    col,
+    c("orthocladius_(euorthoclad.)_rivicola" = "orthocladius_euorthocladius_rivicola",
+      "orthocladius_(symposiocladius)_lignicola" ="orthocladius-symposiocladius_lignicola",
+      "drunella_complexrnutella"= "drunella_cornutella",
+      "paraleptophlebia" = "leptophlebia",
+      "lipiniella" = "chironomidae",
+      "glossiphonia_complexmplanata" = "glossiphonia_complanata" ))}
+
+
+taxa_final3<-taxa_final2 |> 
+  mutate(TAXON_ID= taxon_corrections(TAXON_ID)) |> 
+  #fix those - not sure why they wont do it in the code?
+  mutate(TAXON_ID = case_when(TAXON_ID %in% "orthocladius_(euorthoclad.)_rivicola" ~ "orthocladius_euorthocladius_rivicola",
+                                TAXON_ID %in% "orthocladius_(symposiocladius)_lignicola" ~ "orthocladius-symposiocladius_lignicola",
+                                TRUE ~ TAXON_ID))
+
+#check again
+cw_errors <- anti_join(taxa_final3, insects_cw, by = "TAXON_ID")
+#these look good!
+
+
+taxa_final4<-taxa_final3 |> select("SITE_CODE", "EVENT_DATETIME", "TAXON_ID", 
+"RESULT_VALUE", "SAMPLE_METHOD", "RESULT_COMMENT", "SUBSAMPLE_AMOUNT", 
+"SUBSAMPLE_AMOUNT_UNIT", "REPLICATE", "SAMPLE_METHOD", "EVENT_ID",
+"LAB_SAMPLE_ID", "PROJECT") |> 
+  mutate(RESULT_QUALIFIER = 0,
+         UNIT = "count",
+         SAMPLE_SOURCE = "lab",
+         SAMPLE_TYPE = "macroinvertebrate_abundance",
+         LAB_ANALYTICAL_METHOD = "not_applicable",
+         TEST_TYPE = "not_applicable",
+         RESULT_CATEGORY = "not_applicable",
+         LAB_QUALIFIER = "not_applicable",
+         PREP_METHOD = "not_applicable",
+         ANALYSIS_DATETIME = as.POSIXct(NA)
+         
+         )
+
+
+#look if there are any missing columns
+
+obt_cols<-names(taxa_obt)
+
+missing<- setdiff(obt_cols,names(taxa_final4)) #just missing the obt assigned FKs
+
+#make sure there are not any missing sites
+setdiff(unique(raw$MSSIH_EVENT_SMAS_HISTORY_ID),unique(taxa_final4$SITE_CODE))
+
+#write to the folder
+saveRDS(
+  object = taxa_final4,
+  file = file.path(
+    "L:",
+    "DOW",
+    "BWAM Share",
+    "data",
+    "data_warehouse_staging",
+    "2025",
+    "bap",
+    "taxa_table_ischua.rds"
+  )
+)
+
 
 ```
 
